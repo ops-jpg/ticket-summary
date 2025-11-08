@@ -1,19 +1,12 @@
-const express = require("express");
+import express from "express";
 const app = express();
-
 app.use(express.json());
 
-// Test endpoint
-app.get("/", (req, res) => {
-  res.send("✅ Server is running");
+app.get("/", (req, res) => res.send("✅ Railway app is live!"));
+app.post("/desk-webhook", (req, res) => {
+  console.log("Webhook hit:", req.body);
+  res.json({ ok: true });
 });
 
-// Your webhook endpoint
-app.post("/webhook", (req, res) => {
-  console.log("Received:", req.body);
-  res.send("OK");
-});
-
-// Railway will set PORT automatically
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("🚀 Server running on port", PORT));
+app.listen(PORT, () => console.log("Server running on port " + PORT));
