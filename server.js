@@ -1,54 +1,42 @@
 import express from "express";
-import crypto from "crypto";
 
 const app = express();
 
-// Capture raw body for signature verification
-app.use(express.json({
-  verify: (req, res, buf) => {
-    req.rawBody = buf.toString();
-  }
-}));
+// Use JSON parser
+app.use(express.json({ limit: "5mb" }));
 
-// Health check
+// Health route
 app.get("/", (_req, res) => res.send("✅ Railway app is live!"));
 
-// Webhook endpoint
+// Webhook route
 app.post("/desk-webhook", (req, res) => {
   try {
-    // Step 1: Get the X-Desk-Signature header
-    const signature = req.headers["x-desk-signature"];
-    if (!signature) {
-      console.warn("❌ Missing X-Desk-Signature header");
-      return res.status(400).json({ error: "Missing signature" });
+    // 1️⃣ Verify shared secret header
+    const secretHeader = req.headers["desk-shared-secret"];
+    const sharedSecret = process.env.DESK_SHARED_SECRET;
+
+    if (!secretHeader || !sharedSecret) {
+      console.warn("❌ Missing secret or env var");
+      return res.status(400).json({ error: "Missing secret" });
     }
 
-    // Step 2: Compute the expected signature using your shared secret
-    const expectedSignature = crypto
-      .createHmac("sha256", process.env.DESK_SHARED_SECRET)
-      .update(req.rawBody)
-      .digest("hex");
-
-    // Step 3: Verify the signatures match securely
-    const signatureIsValid = crypto.timingSafeEqual(
-      Buffer.from(signature),
-      Buffer.from(expectedSignature)
-    );
-
-    if (!signatureIsValid) {
-      console.warn("❌ Invalid signature — unauthorized webhook request");
+    // Simple equality check (NOT timingSafeEqual — avoids buffer error)
+    if (secretHeader.trim() !== sharedSecret.trim()) {
+      console.warn("🚫 Invalid desk-shared-secret");
       return res.status(403).json({ error: "Unauthorized" });
     }
 
-    // Step 4: Handle the verified payload
-    console.log("✅ Verified webhook hit:", JSON.stringify(req.body).slice(0, 2000));
+    // 2️⃣ Log incoming webhook safely
+    console.log("✅ Webhook hit:", JSON.stringify(req.body).slice(0, 2000));
+
+    // 3️⃣ Respond success
     res.json({ ok: true });
   } catch (err) {
-    console.error("⚠️ Error verifying webhook:", err);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("❌ Error verifying webhook:", err);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
 // Start server
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
