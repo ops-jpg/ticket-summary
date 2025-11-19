@@ -1,217 +1,292 @@
 // server.js
-
 import express from "express";
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "2mb" }));
 
-// ---- ENV VARS ----------------------------------------------------
-const PORT               = process.env.PORT || 8080;
-const DESK_SHARED_SECRET = process.env.DESK_SHARED_SECRET;
-const OPENAI_API_KEY     = process.env.OPENAI_API_KEY;
-const ZOHO_ORG_ID        = process.env.ZOHO_ORG_ID;
-const ZOHO_ACCESS_TOKEN  = process.env.ZOHO_ACCESS_TOKEN;
+// ---- Helpers ---------------------------------------------------------
 
-if (!DESK_SHARED_SECRET) console.warn("⚠️ DESK_SHARED_SECRET is not set");
-if (!OPENAI_API_KEY)     console.warn("⚠️ OPENAI_API_KEY is not set");
-if (!ZOHO_ORG_ID)        console.warn("⚠️ ZOHO_ORG_ID is not set");
-if (!ZOHO_ACCESS_TOKEN)  console.warn("⚠️ ZOHO_ACCESS_TOKEN is not set");
+// Only allow Zoho picklist values for Follow-up Status
+function normalizeFollowUpStatus(aiStatus) {
+  if (!aiStatus) return "No Commitment Found";
 
-// ---- HEALTH CHECK ------------------------------------------------
-app.get("/", (_req, res) => {
-  res.send("✅ Railway app is live!");
-});
+  const s = String(aiStatus).toLowerCase();
 
-// ---- OPENAI ANALYSIS ---------------------------------------------
-async function analyzeTicket(conversationText) {
-  const systemPrompt = `
-You are an assistant that evaluates support tickets.
+  // Explicit matches
+  if (s.includes("follow-up completed") || s.includes("follow up completed") || s.includes("completed")) {
+    return "Follow-up Completed";
+  }
+  if (s.includes("delayed")) {
+    return "Delayed Follow-up";
+  }
+  if (s.includes("missed")) {
+    return "Missed Follow-up";
+  }
 
-Return STRICT JSON with this exact shape:
+  // Variants of "no follow-up required"
+  if (s.includes("no follow-up required") ||
+      s.includes("no follow up required") ||
+      s.includes("no follow-up needed") ||
+      s.includes("no follow up needed") ||
+      s.includes("not required") ||
+      s.includes("no commitment")) {
+    return "No Commitment Found";
+  }
 
-{
-  "title": string,
-  "follow_up_status": "Follow-up Needed" | "Follow-up Completed" | "No Follow-up Required",
-  "category": string,
-  "subcategory": string,
-  "scores": {
-    "follow_up_frequency": number,
-    "no_drops": number,
-    "sla_adherence": number,
-    "resolution_quality": number,
-    "customer_sentiment": number,
-    "agent_tone": number
-  },
-  "score_reasons": {
-    "follow_up_frequency": string,
-    "no_drops": string,
-    "sla_adherence": string,
-    "resolution_quality": string,
-    "customer_sentiment": string,
-    "agent_tone": string
-  },
-  "final_score": number,
-  "reasons": string
+  // Safe default
+  return "No Commitment Found";
 }
 
-Rules:
-- All scores are from 0–10.
-- "score_reasons" must contain a short reason *specific* to that score.
-- ONLY output raw JSON. No markdown, no extra text.
-`;
+// Build the prompt sent to OpenAI
+function buildPrompt(payload) {
+  const subject = payload.subject || "N/A";
+  const channel = payload.channel || "N/A";
+  const ticketId = payload.ticket_id || "N/A";
+  const conversation = payload.conversation || "";
 
-  const userPrompt = `Here is the ticket transcript:\n\n${conversationText}`;
+  return `
+You are an expert QA and coaching assistant for a VoIP / Support team.
+
+You will receive the FULL conversation of a Zoho Desk ticket, including:
+- ticket subject
+- channel
+- user and agent messages
+- internal notes
+
+Your job is to:
+1. Classify **follow-up status** into one of these 4 values:
+   - "Follow-up Completed"
+   - "Delayed Follow-up"
+   - "Missed Follow-up"
+   - "No Follow-up Required"
+2. Score the ticket from 1–10 on:
+   - follow_up_frequency
+   - no_drops
+   - sla_adherence
+   - resolution_quality
+   - customer_sentiment
+   - agent_tone
+3. Provide a short **reason** text for each score.
+4. Provide:
+   - overall category (e.g. "Technical Support", "How-To / Configuration / Settings", etc.)
+   - subcategory (e.g. "VoIP Call Flow Configuration", "Training on call flow / IVR setup", etc.)
+   - final_score (1–10)
+   - overall explanation/reasons (2–4 sentences).
+
+CRITICAL:
+- Respond with **ONLY valid JSON**, no backticks, no markdown.
+- Use this exact JSON shape:
+
+{
+  "title": "string",
+  "follow_up_status": "one of: Follow-up Completed, Delayed Follow-up, Missed Follow-up, No Follow-up Required",
+  "category": "string",
+  "subcategory": "string",
+  "scores": {
+    "follow_up_frequency": 0,
+    "no_drops": 0,
+    "sla_adherence": 0,
+    "resolution_quality": 0,
+    "customer_sentiment": 0,
+    "agent_tone": 0
+  },
+  "score_reasons": {
+    "follow_up_frequency": "string",
+    "no_drops": "string",
+    "sla_adherence": "string",
+    "resolution_quality": "string",
+    "customer_sentiment": "string",
+    "agent_tone": "string"
+  },
+  "final_score": 0,
+  "reasons": "string"
+}
+
+Conversation context:
+
+Ticket ID: ${ticketId}
+Subject: ${subject}
+Channel: ${channel}
+
+Full conversation & notes:
+${conversation}
+`;
+}
+
+// Call OpenAI
+async function callOpenAI(payload) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing OPENAI_API_KEY env var");
+  }
+
+  const prompt = buildPrompt(payload);
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model: "gpt-4.1-mini",
-      temperature: 0.2,
       messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ]
-    })
+        { role: "system", content: "You are a concise, JSON-only scoring assistant." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.2,
+    }),
   });
 
   const data = await resp.json();
-  const content = data?.choices?.[0]?.message?.content || "{}";
 
-  let ai;
-  try {
-    ai = JSON.parse(content);
-  } catch (e) {
-    console.error("❌ Failed to parse AI JSON:", content);
-    throw e;
+  if (!resp.ok) {
+    console.error("OpenAI error:", data);
+    throw new Error("OpenAI API error");
   }
 
-  console.log(
-    "AI result:",
-    JSON.stringify(ai, null, 2).slice(0, 4000) // avoid huge logs
-  );
-  return ai;
+  const content = data.choices?.[0]?.message?.content || "";
+  console.log("Raw OpenAI content:", content);
+
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch (e) {
+    console.error("Failed to parse OpenAI JSON, returning fallback:", e);
+    throw new Error("OpenAI returned invalid JSON");
+  }
+
+  return parsed;
 }
 
-// ---- MAP AI → ZOHO DESK CUSTOM FIELDS ----------------------------
-function buildDeskCf(ai) {
-  const scores       = ai.scores || {};
-  const scoreReasons = ai.score_reasons || {};
+// Call Zoho Desk to update ticket custom fields
+async function updateZohoDeskTicket(ticketId, ai) {
+  const baseUrl = process.env.DESK_BASE_URL || "https://desk.zoho.com/api/v1";
+  const orgId = process.env.DESK_ORG_ID;
+  const oauth = process.env.DESK_OAUTH_TOKEN;
 
-  const cf = {};
+  if (!orgId || !oauth) {
+    throw new Error("Missing DESK_ORG_ID or DESK_OAUTH_TOKEN env vars");
+  }
 
-  // High-level AI fields
-  cf.cf_ai_category_1           = ai.category || null;
-  cf.cf_ai_sub_category         = ai.subcategory || null;
-  cf.cf_follow_up_status        = ai.follow_up_status || null;
-  cf.cf_ai_final_score          = String(ai.final_score ?? "");
-  cf.cf_ai_category_explanation =
-    `Follow-up: ${ai.follow_up_status || ""} | Reasons: ${ai.reasons || ""}`;
+  const scores = ai.scores || {};
+  const reasons = ai.score_reasons || {};
 
-  // Numeric scores
-  cf.cf_follow_up_frequency = scores.follow_up_frequency;
-  cf.cf_no_drops_score      = scores.no_drops;
-  cf.cf_sla_adherence       = scores.sla_adherence;
-  cf.cf_resolution_quality  = scores.resolution_quality;
-  cf.cf_customer_sentiment  = scores.customer_sentiment;
-  cf.cf_agent_tone          = scores.agent_tone;
+  // Map AI → Zoho Desk custom fields (display names)
+  const customFields = {
+    // high-level classification
+    "AI Category": ai.category || "",
+    "AI Sub Category": ai.subcategory || "",
+    "AI Category explanation": ai.reasons || "",
+    "AI Final Score": ai.final_score || null,
 
-  // Per-score reasons (text fields)
-  cf.cf_reason_follow_up_frequency = scoreReasons.follow_up_frequency || null;
-  cf.cf_reason_no_drops            = scoreReasons.no_drops || null;
-  cf.cf_reasons_sla_adherence      = scoreReasons.sla_adherence || null;
-  cf.cf_reason_resolution_quality  = scoreReasons.resolution_quality || null;
-  cf.cf_reason_customer_sentiment  = scoreReasons.customer_sentiment || null;
-  cf.cf_reason_agent_tone          = scoreReasons.agent_tone || null;
+    // follow-up picklist (normalized)
+    "Follow-up Status": normalizeFollowUpStatus(ai.follow_up_status),
 
-  return cf;
-}
+    // numeric scores
+    "Follow-Up Frequency": scores.follow_up_frequency ?? null,
+    "No Drops Score": scores.no_drops ?? null,
+    "SLA Adherence": scores.sla_adherence ?? null,
+    "Resolution Quality": scores.resolution_quality ?? null,
+    "Customer Sentiment": scores.customer_sentiment ?? null,
+    "Agent Tone": scores.agent_tone ?? null,
 
-// ---- UPDATE ZOHO DESK TICKET ------------------------------------
-async function updateDeskTicket(ticketId, ai) {
-  const cf = buildDeskCf(ai);
+    // reasons for each score
+    "Reason Follow-Up Frequency": reasons.follow_up_frequency || "",
+    "Reason No Drops": reasons.no_drops || "",
+    "Reasons SLA Adherence": reasons.sla_adherence || "",
+    "Reason Resolution Quality": reasons.resolution_quality || "",
+    "Reason Customer Sentiment": reasons.customer_sentiment || "",
+    "Reason Agent Tone": reasons.agent_tone || "",
+  };
 
-  const url = `https://desk.zoho.com/api/v1/tickets/${ticketId}`;
+  // Clean null/empty-only fields (Zoho gets grumpy with undefined)
+  Object.keys(customFields).forEach((k) => {
+    const v = customFields[k];
+    if (v === undefined) delete customFields[k];
+  });
+
+  const body = {
+    customFields,
+  };
+
+  const url = `${baseUrl}/tickets/${ticketId}`;
 
   const resp = await fetch(url, {
     method: "PATCH",
     headers: {
-      orgId: ZOHO_ORG_ID,
-      Authorization: `Zoho-oauthtoken ${ZOHO_ACCESS_TOKEN}`,
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      orgId: orgId,
+      Authorization: `Zoho-oauthtoken ${oauth}`,
     },
-    body: JSON.stringify({ cf })
+    body: JSON.stringify(body),
   });
 
-  const text = await resp.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = text;
-  }
-
-  console.log("Desk update response:", data);
+  const data = await resp.json();
   return { status: resp.status, data };
 }
 
-// ---- WEBHOOK ENDPOINT FROM ZOHO DESK ----------------------------
+// ---- Routes -----------------------------------------------------------
+
+app.get("/", (_req, res) => {
+  res.send("✅ Railway app is live!");
+});
+
 app.post("/desk-webhook", async (req, res) => {
   try {
-    const incomingSecret = req.headers["desk-shared-secret"];
+    // 1) Verify shared secret
+    const headerSecret =
+      req.headers["desk-shared-secret"] ||
+      req.headers["desk_shared_secret"] ||
+      req.headers["x-desk-signature"];
 
-    if (!DESK_SHARED_SECRET) {
-      console.error("❌ DESK_SHARED_SECRET env var not configured");
-      return res
-        .status(500)
-        .json({ ok: false, error: "Server secret not configured" });
+    if (!process.env.DESK_SHARED_SECRET) {
+      console.error("Missing DESK_SHARED_SECRET env var");
+      return res.status(500).json({ error: "Server misconfigured" });
     }
 
-    if (!incomingSecret || incomingSecret !== DESK_SHARED_SECRET) {
-      console.warn("❌ Invalid or missing desk-shared-secret header");
-      return res.status(403).json({ ok: false, error: "Unauthorized" });
+    if (!headerSecret || headerSecret !== process.env.DESK_SHARED_SECRET) {
+      console.warn("Unauthorized webhook: bad or missing secret", headerSecret);
+      return res.status(403).json({ error: "Unauthorized" });
     }
 
-    console.log(
-      "Webhook hit:",
-      JSON.stringify(req.body).slice(0, 4000)
-    );
+    const payload = req.body || {};
+    console.log("Webhook hit (truncated):", JSON.stringify(payload).slice(0, 2000));
 
-    const { ticket_id, conversation } = req.body || {};
-
-    if (!ticket_id || !conversation) {
-      console.warn("❌ Missing ticket_id or conversation in payload");
-      return res
-        .status(400)
-        .json({ ok: false, error: "ticket_id and conversation are required" });
+    const ticketId = payload.ticket_id;
+    if (!ticketId) {
+      return res.status(400).json({ error: "ticket_id missing in payload" });
     }
 
-    // 1) Call OpenAI to analyze the conversation
-    const ai = await analyzeTicket(conversation);
+    // 2) Call OpenAI to score / classify
+    const ai = await callOpenAI(payload);
+    console.log("AI result:", JSON.stringify(ai));
 
-    // 2) Update Zoho Desk ticket with scores + reasons
-    const deskUpdate = await updateDeskTicket(ticket_id, ai);
+    // 3) Update Zoho Desk custom fields
+    let deskResult = null;
+    try {
+      deskResult = await updateZohoDeskTicket(ticketId, ai);
+      console.log("Desk update response:", JSON.stringify(deskResult).slice(0, 2000));
+    } catch (deskErr) {
+      console.error("Zoho Desk update failed:", deskErr);
+      deskResult = { status: 500, data: { error: String(deskErr) } };
+    }
 
-    // 3) Respond to Zoho Desk (your Deluge function)
-    return res.json({
+    // 4) Respond back so Deluge can log it
+    res.json({
       ok: true,
       ai,
-      desk: deskUpdate
+      desk: deskResult,
     });
   } catch (err) {
-    console.error("❌ Error handling /desk-webhook:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "Internal server error",
-      details: err.message
-    });
+    console.error("Error in /desk-webhook:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// ---- START SERVER -----------------------------------------------
+// ---- Start server -----------------------------------------------------
+
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log("🚀 Server running on port", PORT);
+  console.log("Server running on port", PORT);
 });
