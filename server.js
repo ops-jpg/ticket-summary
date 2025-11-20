@@ -312,7 +312,7 @@ async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
 
   console.log("Owner time remark:", ownerTimeRemark);
 
-  // customFields by display name
+  // ----- 1) customFields by LABEL -----
   const customFields = {
     // MAIN AI LABELS
     "Follow-up Status": followUpStatus,
@@ -337,18 +337,21 @@ async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
     "Reason Customer Sentiment": scoreReasons.customer_sentiment || "",
     "Reason Agent Tone": scoreReasons.agent_tone || "",
 
-    // OWNER TIME REMARK – label in UI used to be "TS Resolution"
-    // (your field now labeled "Remarks-OC Log" but API still uses old name)
-    "TS Resolution": ownerTimeRemark || "",
+    // 🔹 OWNER TIME REMARK: try both old & new labels
+    "TS Resolution": ownerTimeRemark || "",      // old label you had
+    "Remarks-OC Log": ownerTimeRemark || ""      // current label in UI
   };
 
+  // ----- 2) cf object by API NAME -----
   const body = {
-    // We normally leave status as-is; only touching custom fields
     customFields,
-    // ALSO update via API-name map, to be 100% sure:
     cf: {
+      // what you told me is the API name
       cf_ts_resolution: ownerTimeRemark || "",
-    },
+
+      // likely API if Zoho created it from label "Remarks-OC Log"
+      cf_remarks_oc_log: ownerTimeRemark || ""
+    }
   };
 
   console.log("Desk update payload:", JSON.stringify(body).slice(0, 800));
@@ -358,9 +361,9 @@ async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
     headers: {
       Authorization: `Zoho-oauthtoken ${ZOHO_OAUTH_TOKEN}`,
       orgId: ZOHO_ORG_ID,
-      "Content-Type": "application/json",
+      "Content-Type": "application/json"
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(body)
   });
 
   const data = await r.json().catch(() => ({}));
@@ -368,6 +371,7 @@ async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
 
   return { status: r.status, data };
 }
+
 
 // ---- Health check ----
 app.get("/", (_req, res) => {
