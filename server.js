@@ -1,24 +1,19 @@
 import express from "express";
+import crypto from "crypto";
 
-// Node 18+ has global fetch. If you're on older Node, install node-fetch and import it:
+// Node 18+ has global fetch. If not, uncomment next line:
 // import fetch from "node-fetch";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
-// ------------ ENV VARS ------------
-const DESK_SHARED_SECRET   = process.env.DESK_SHARED_SECRET;
-const OPENAI_API_KEY       = process.env.OPENAI_API_KEY;
-const ZOHO_DESK_ORG_ID     = process.env.ZOHO_DESK_ORG_ID;
-const ZOHO_DESK_OAUTH      = process.env.ZOHO_DESK_OAUTH_TOKEN;
-const ZOHO_DESK_BASE_URL   = process.env.ZOHO_DESK_BASE_URL || "https://desk.zoho.com/api/v1";
+// ---- ENV VARS ----
+const DESK_SHARED_SECRET = process.env.DESK_SHARED_SECRET;
+const OPENAI_API_KEY     = process.env.OPENAI_API_KEY;
+const ZOHO_ORG_ID        = process.env.ZOHO_ORG_ID;
+const ZOHO_OAUTH_TOKEN   = process.env.ZOHO_OAUTH_TOKEN;
 
-if (!DESK_SHARED_SECRET) console.warn("⚠️ DESK_SHARED_SECRET not set");
-if (!OPENAI_API_KEY)     console.warn("⚠️ OPENAI_API_KEY not set");
-if (!ZOHO_DESK_ORG_ID)   console.warn("⚠️ ZOHO_DESK_ORG_ID not set");
-if (!ZOHO_DESK_OAUTH)    console.warn("⚠️ ZOHO_DESK_OAUTH_TOKEN not set");
-
-// ------------ REFERENCE LIST (from you) ------------
+// ---- CATEGORY REFERENCE LIST ----
 const REFERENCE_LIST = `Category: Desktop Phones
 - Phone not ringing when receiving calls
 - Unable to make outbound calls
@@ -153,10 +148,18 @@ Category: Installations
 - V3 migration setup
 - Bluetooth headset installation`;
 
-// ------------ PROMPT BUILDER ------------
-const PROMPT = ({ subject, status, priority, channel, department, conversation }) => `
-You are an AI Ticket Audit Assistant. Analyze this Zoho Desk ticket for 360° agent performance using ONLY the provided data.
-Evaluate follow-ups, tone, and resolution quality.
+// ---- PROMPT (includes owner-change log) ----
+const PROMPT = ({
+  subject,
+  status,
+  priority,
+  channel,
+  department,
+  conversation,
+  ownerChangeLog,
+}) => `
+You are an AI Ticket Audit Assistant. Analyze this Zoho Desk ticket for 360° agent performance using only the provided data.
+Evaluate follow-ups, tone, resolution quality, and how long the ticket stayed with each team/owner using the Owner Change Log.
 
 1. FOLLOW-UP AUDIT:
 Check if the agent promised any callback/follow-up and whether it was completed.
@@ -165,11 +168,11 @@ Classify as exactly one of:
 - Delayed Follow-up
 - Missed Follow-up
 - No Commitment Found
-Return in JSON as: "follow_up_status": "<one of the four above>"
+Return as: "follow_up_status": "<one>"
 
 2. CATEGORY & SUBCATEGORY (STRICT):
 Use ONLY the Category → Subcategory reference list below.
-Do NOT invent names; pick the closest best match from the list.
+Do not invent names; pick the closest best match from the list.
 Return: "category": "<Category>", "subcategory": "<Subcategory>"
 
 REFERENCE LIST:
@@ -180,10 +183,18 @@ ${REFERENCE_LIST}
 - No Drops
 - SLA Adherence
 - Resolution Quality
-- Customer Sentiment (0–10)
-- Agent Tone (0–10)
+- Customer Sentiment (0–10, treat -10..+10 notes as 0..10)
+- Agent Tone
 
-Also provide a SHORT reason for each score in a "score_reasons" object.
+Also provide a short 1–2 sentence reason for *each* score:
+"score_reasons": {
+  "follow_up_frequency": "...",
+  "no_drops": "...",
+  "sla_adherence": "...",
+  "resolution_quality": "...",
+  "customer_sentiment": "...",
+  "agent_tone": "..."
+}
 
 4. FINAL AI TICKET SCORE (0–10 weighted):
 - Follow-Up 15%
@@ -192,6 +203,13 @@ Also provide a SHORT reason for each score in a "score_reasons" object.
 - Resolution 20%
 - Sentiment 15%
 - Tone 15%
+
+5. OWNER / TEAM TIME REMARK:
+From the Owner Change Log, estimate which owner/team handled the ticket the most and how the ownership moved.
+You DO NOT need exact hours. A brief summary like
+"Most time with VoIP Team, then briefly with Billing; finally closed by Chloe Finn"
+is enough.
+Return this as: "owner_time_summary": "<short remark>"
 
 Return a single JSON object only, with keys:
 {
@@ -216,7 +234,8 @@ Return a single JSON object only, with keys:
     "agent_tone": "..."
   },
   "final_score": 0,
-  "reasons": "one brief paragraph explaining overall assessment"
+  "reasons": "one brief paragraph",
+  "owner_time_summary": "one short sentence about which team/owner had the ticket longest"
 }
 
 Ticket:
@@ -227,206 +246,82 @@ Channel: ${channel}
 Department: ${department}
 Conversation:
 ${conversation}
+
+Owner Change Log:
+${ownerChangeLog || "(none)"}  
 `;
 
-// ------------ OPENAI CALL ------------
+// ---- OpenAI caller ----
 async function callOpenAI(prompt) {
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json"
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
       temperature: 0.2,
       messages: [
-        { role: "system", content: "Only output valid JSON that matches the requested schema." },
-        { role: "user", content: prompt }
-      ]
-    })
+        {
+          role: "system",
+          content:
+            "Only output valid JSON that matches the requested schema. Do not include markdown.",
+        },
+        { role: "user", content: prompt },
+      ],
+    }),
   });
 
   if (!r.ok) {
-    const text = await r.text().catch(() => "");
-    throw new Error(`OpenAI error ${r.status}: ${text}`);
+    const txt = await r.text();
+    throw new Error(`OpenAI error ${r.status}: ${txt}`);
   }
 
   const data = await r.json();
   return JSON.parse(data.choices[0].message.content);
 }
 
-// ------------ FOLLOW-UP STATUS NORMALISATION ------------
+// ---- Map AI follow-up to allowed picklist ----
 function normalizeFollowUpStatus(raw) {
-  if (!raw) return "No Commitment Found";
-  const t = raw.toString().toLowerCase().trim();
+  if (!raw) return null;
+  const s = raw.toString().toLowerCase();
 
-  const map = {
-    "follow-up completed": "Follow-up Completed",
-    "follow up completed": "Follow-up Completed",
-    "completed": "Follow-up Completed",
+  if (s.includes("completed")) return "Follow-up Completed";
+  if (s.includes("delayed")) return "Delayed Follow-up";
+  if (s.includes("missed")) return "Missed Follow-up";
+  if (s.includes("no follow-up required") || s.includes("no commitment"))
+    return "No Follow-up Required";
 
-    "delayed follow-up": "Delayed Follow-up",
-    "delayed follow up": "Delayed Follow-up",
-    "delayed": "Delayed Follow-up",
-
-    "missed follow-up": "Missed Follow-up",
-    "missed follow up": "Missed Follow-up",
-    "missed": "Missed Follow-up",
-
-    "no commitment found": "No Commitment Found",
-    "no follow-up required": "No Commitment Found",
-    "no follow up required": "No Commitment Found",
-    "none": "No Commitment Found"
-  };
-
-  for (const [k, v] of Object.entries(map)) {
-    if (t === k || t.includes(k)) return v;
-  }
+  // fallback
   return "No Commitment Found";
 }
 
-// ------------ OWNER CHANGE LOG PARSING ------------
-function safeDate(str) {
-  if (!str) return null;
-  const d = new Date(str);
-  return isNaN(d.getTime()) ? null : d;
-}
-
-// line format example:
-// "Owner changed to Chloe Finn (Tech OB) on 2025-11-18 21:30:23"
-function parseOwnerChangeLog(logText, createdIso, closedIso) {
-  if (!logText || typeof logText !== "string") return { segments: [] };
-
-  const created = safeDate(createdIso);
-  const closed = safeDate(closedIso);
-
-  const lines = logText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const entries = [];
-
-  const re = /Owner changed to (.+?)(?: \((.+?)\))? on (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/i;
-
-  for (const line of lines) {
-    const m = line.match(re);
-    if (!m) continue;
-    const owner = m[1].trim();
-    const role = (m[2] || "Unknown").trim();
-    const when = safeDate(m[3].replace(" ", "T") + "Z"); // treat as UTC
-    if (!when) continue;
-    entries.push({ owner, role, when });
-  }
-
-  if (entries.length === 0) return { segments: [] };
-
-  entries.sort((a, b) => a.when - b.when);
-
-  const segments = [];
-  for (let i = 0; i < entries.length; i++) {
-    const cur = entries[i];
-    const next = entries[i + 1];
-    const from = cur.when;
-    let to;
-
-    if (next) {
-      to = next.when;
-    } else if (closed) {
-      to = closed;
-    } else {
-      to = new Date(); // fallback
-    }
-
-    const hours = Math.max(0, (to - from) / 3_600_000);
-    segments.push({
-      owner: cur.owner,
-      role: cur.role,
-      from: from.toISOString(),
-      to: to.toISOString(),
-      hours
-    });
-  }
-
-  if (created && created < new Date(segments[0].from)) {
-    const first = segments[0];
-    const extraHours = Math.max(0, (new Date(first.from) - created) / 3_600_000);
-    first.from = created.toISOString();
-    first.hours += extraHours;
-  }
-
-  return { segments };
-}
-
-function summarizeOwnerTime(parsed) {
-  const segments = parsed.segments || [];
-  const byUser = {};
-  const byRole = {};
-  let totalHours = 0;
-
-  for (const seg of segments) {
-    const h = seg.hours || 0;
-    totalHours += h;
-
-    if (seg.owner) {
-      byUser[seg.owner] = (byUser[seg.owner] || 0) + h;
-    }
-    const role = seg.role || "Unknown";
-    byRole[role] = (byRole[role] || 0) + h;
-  }
-
-  return { segments, byUser, byRole, totalHours };
-}
-
-function buildOwnerTimeRemark(ownerTime) {
-  if (!ownerTime || !ownerTime.byRole || Object.keys(ownerTime.byRole).length === 0) {
-    return "Owner time could not be determined from the Owner Change Log.";
-  }
-
-  let topRole = null;
-  let topHours = 0;
-  let total = 0;
-
-  for (const [role, hrs] of Object.entries(ownerTime.byRole)) {
-    total += hrs;
-    if (hrs > topHours) {
-      topHours = hrs;
-      topRole = role;
-    }
-  }
-
-  if (!topRole || total === 0) {
-    return "Owner time could not be determined from the Owner Change Log.";
-  }
-
-  const pct = Math.round((topHours / total) * 100);
-  return `Most of this ticket's time (${topHours.toFixed(1)} hours, ${pct}% of total) was spent with the ${topRole} team. Please refer to the Owner Change Log for full history.`;
-}
-
-// ------------ ZOHO DESK UPDATE ------------
-async function updateZohoDeskTicket({ ticketId, aiResult, ownerTimeRemark }) {
-  if (!ZOHO_DESK_OAUTH || !ZOHO_DESK_ORG_ID) {
-    console.warn("⚠️ Zoho Desk env vars not set, skipping update");
-    return { skipped: true };
-  }
-  if (!ticketId) {
-    console.warn("⚠️ No ticketId provided for Desk update");
+// ---- Update Zoho Desk ticket ----
+async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
+  if (!ZOHO_OAUTH_TOKEN || !ZOHO_ORG_ID) {
+    console.warn("ZOHO_OAUTH_TOKEN or ZOHO_ORG_ID missing; skipping Desk update.");
     return { skipped: true };
   }
 
   const scores = aiResult.scores || {};
   const scoreReasons = aiResult.score_reasons || {};
-
   const followUpStatus = normalizeFollowUpStatus(aiResult.follow_up_status);
+  const ownerTimeRemark = aiResult.owner_time_summary || "";
 
-  // These keys are *field labels* in your Zoho layout.
+  console.log("Owner time remark:", ownerTimeRemark);
+
+  // customFields by display name
   const customFields = {
-    // main AI labels
+    // MAIN AI LABELS
     "Follow-up Status": followUpStatus,
     "AI Category": aiResult.category || "",
     "AI Sub Category": aiResult.subcategory || "",
     "AI Final Score": aiResult.final_score ?? null,
     "AI Category explanation": aiResult.reasons || "",
 
-    // numeric scores
+    // NUMERIC SCORES
     "Follow-Up Frequency": scores.follow_up_frequency ?? null,
     "No Drops Score": scores.no_drops ?? null,
     "SLA Adherence": scores.sla_adherence ?? null,
@@ -434,7 +329,7 @@ async function updateZohoDeskTicket({ ticketId, aiResult, ownerTimeRemark }) {
     "Customer Sentiment": scores.customer_sentiment ?? null,
     "Agent Tone": scores.agent_tone ?? null,
 
-    // per-score reasons
+    // PER-SCORE REASONS
     "Reason Follow-Up Frequency": scoreReasons.follow_up_frequency || "",
     "Reason No Drops": scoreReasons.no_drops || "",
     "Reasons SLA Adherence": scoreReasons.sla_adherence || "",
@@ -442,46 +337,48 @@ async function updateZohoDeskTicket({ ticketId, aiResult, ownerTimeRemark }) {
     "Reason Customer Sentiment": scoreReasons.customer_sentiment || "",
     "Reason Agent Tone": scoreReasons.agent_tone || "",
 
-    // 👇 Owner time remark → your multiline "TS Resolution" (API name cf_ts_resolution)
-    "TS Resolution": ownerTimeRemark || ""
+    // OWNER TIME REMARK – label in UI used to be "TS Resolution"
+    // (your field now labeled "Remarks-OC Log" but API still uses old name)
+    "TS Resolution": ownerTimeRemark || "",
   };
 
-  const body = { customFields };
-
-  const url = `${ZOHO_DESK_BASE_URL}/tickets/${ticketId}`;
-
-  const resp = await fetch(url, {
-    method: "PUT",
-    headers: {
-      "Authorization": `Zoho-oauthtoken ${ZOHO_DESK_OAUTH}`,
-      "orgId": ZOHO_DESK_ORG_ID,
-      "Content-Type": "application/json"
+  const body = {
+    // We normally leave status as-is; only touching custom fields
+    customFields,
+    // ALSO update via API-name map, to be 100% sure:
+    cf: {
+      cf_ts_resolution: ownerTimeRemark || "",
     },
-    body: JSON.stringify(body)
+  };
+
+  console.log("Desk update payload:", JSON.stringify(body).slice(0, 800));
+
+  const r = await fetch(`https://desk.zoho.com/api/v1/tickets/${ticketId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Zoho-oauthtoken ${ZOHO_OAUTH_TOKEN}`,
+      orgId: ZOHO_ORG_ID,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
   });
 
-  const data = await resp.json().catch(() => ({}));
+  const data = await r.json().catch(() => ({}));
+  console.log("Desk update response:", JSON.stringify(data).slice(0, 1200));
 
-  if (!resp.ok) {
-    console.error("❌ Zoho Desk update failed", resp.status, data);
-    throw new Error(`Zoho Desk update error ${resp.status}`);
-  }
-
-  console.log("✅ Zoho Desk update response:", JSON.stringify(data).slice(0, 2000));
-  return data;
+  return { status: r.status, data };
 }
 
-// ------------ HEALTH CHECK ------------
+// ---- Health check ----
 app.get("/", (_req, res) => {
   res.send("✅ Railway app is live!");
 });
 
-// ------------ MAIN WEBHOOK ------------
+// ---- Webhook ----
 app.post("/desk-webhook", async (req, res) => {
   try {
     const secret = req.headers["desk-shared-secret"];
     if (!secret || secret !== DESK_SHARED_SECRET) {
-      console.warn("❌ Unauthorized webhook hit");
       return res.status(403).json({ error: "Unauthorized" });
     }
 
@@ -495,48 +392,43 @@ app.post("/desk-webhook", async (req, res) => {
       department = "N/A",
       conversation = "",
       owner_change_log = "",
-      ticket_created_time = null,
-      ticket_closed_time = null
     } = body;
 
-    console.log("🎯 Webhook for ticket:", ticket_id, "| Subject:", subject);
+    console.log(
+      "Webhook hit:",
+      JSON.stringify({ ticket_id, subject }).slice(0, 300)
+    );
 
-    const prompt = PROMPT({ subject, status, priority, channel, department, conversation });
+    const prompt = PROMPT({
+      subject,
+      status,
+      priority,
+      channel,
+      department,
+      conversation,
+      ownerChangeLog: owner_change_log,
+    });
+
     const ai = await callOpenAI(prompt);
-    console.log("🤖 AI result:", JSON.stringify(ai).slice(0, 2000));
 
-    const parsedOwner = parseOwnerChangeLog(owner_change_log, ticket_created_time, ticket_closed_time);
-    const ownerTime = summarizeOwnerTime(parsedOwner);
-    console.log("⏱ Owner time summary:", ownerTime);
-    const ownerRemark = buildOwnerTimeRemark(ownerTime);
-    console.log("📝 Owner remark:", ownerRemark);
-
-    let deskUpdate = null;
-    try {
-      deskUpdate = await updateZohoDeskTicket({
-        ticketId: ticket_id,
-        aiResult: ai,
-        ownerTimeRemark: ownerRemark
-      });
-    } catch (e) {
-      console.error("Zoho Desk update error (non-fatal for webhook):", e.message);
+    let deskResult = { skipped: true };
+    if (ticket_id) {
+      deskResult = await updateDeskTicket(ticket_id, ai, owner_change_log);
+    } else {
+      console.warn("No ticket_id in payload; skipping Desk update.");
     }
 
-    return res.json({
-      ok: true,
-      ai,
-      owner_time: ownerTime,
-      owner_remark: ownerRemark,
-      desk_update: deskUpdate
-    });
+    return res.json({ ok: true, ai, desk: deskResult });
   } catch (err) {
     console.error("Webhook error:", err);
-    return res.status(500).json({ ok: false, error: err.message });
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Unknown error" });
   }
 });
 
-// ------------ START SERVER ------------
+// ---- Start server ----
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log("🚀 Server running on port", PORT);
+  console.log("Server running on port", PORT);
 });
