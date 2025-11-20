@@ -1,19 +1,24 @@
-// server.js
 import express from "express";
+
+// Node 18+ has global fetch. If you're on older Node, install node-fetch and import it:
+// import fetch from "node-fetch";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
-// ---- ENV VARS --------------------------------------------------------
+// ------------ ENV VARS ------------
+const DESK_SHARED_SECRET   = process.env.DESK_SHARED_SECRET;
+const OPENAI_API_KEY       = process.env.OPENAI_API_KEY;
+const ZOHO_DESK_ORG_ID     = process.env.ZOHO_DESK_ORG_ID;
+const ZOHO_DESK_OAUTH      = process.env.ZOHO_DESK_OAUTH_TOKEN;
+const ZOHO_DESK_BASE_URL   = process.env.ZOHO_DESK_BASE_URL || "https://desk.zoho.com/api/v1";
 
-const DESK_SHARED_SECRET = process.env.DESK_SHARED_SECRET;
-const OPENAI_API_KEY     = process.env.OPENAI_API_KEY;
-const DESK_ORG_ID        = process.env.DESK_ORG_ID;
-const DESK_OAUTH_TOKEN   = process.env.DESK_OAUTH_TOKEN;
-const DESK_BASE_URL      = process.env.DESK_BASE_URL || "https://desk.zoho.com/api/v1";
+if (!DESK_SHARED_SECRET) console.warn("⚠️ DESK_SHARED_SECRET not set");
+if (!OPENAI_API_KEY)     console.warn("⚠️ OPENAI_API_KEY not set");
+if (!ZOHO_DESK_ORG_ID)   console.warn("⚠️ ZOHO_DESK_ORG_ID not set");
+if (!ZOHO_DESK_OAUTH)    console.warn("⚠️ ZOHO_DESK_OAUTH_TOKEN not set");
 
-// ---- CATEGORY / SUBCATEGORY REFERENCE LIST --------------------------
-
+// ------------ REFERENCE LIST (from you) ------------
 const REFERENCE_LIST = `Category: Desktop Phones
 - Phone not ringing when receiving calls
 - Unable to make outbound calls
@@ -148,82 +153,52 @@ Category: Installations
 - V3 migration setup
 - Bluetooth headset installation`;
 
-// ---- PROMPT BUILDER (forces allowed categories + follow-up values) ---
-
-function PROMPT(payload) {
-  const {
-    subject = "N/A",
-    status = "N/A",
-    priority = "N/A",
-    channel = "N/A",
-    department = "N/A",
-    conversation = ""
-  } = payload || {};
-
-  return `
+// ------------ PROMPT BUILDER ------------
+const PROMPT = ({ subject, status, priority, channel, department, conversation }) => `
 You are an AI Ticket Audit Assistant. Analyze this Zoho Desk ticket for 360° agent performance using ONLY the provided data.
+Evaluate follow-ups, tone, and resolution quality.
 
-Your tasks:
+1. FOLLOW-UP AUDIT:
+Check if the agent promised any callback/follow-up and whether it was completed.
+Classify as exactly one of:
+- Follow-up Completed
+- Delayed Follow-up
+- Missed Follow-up
+- No Commitment Found
+Return in JSON as: "follow_up_status": "<one of the four above>"
 
-1. FOLLOW-UP AUDIT
-Decide if the agent promised or needed a follow-up and whether it was completed.
-Classify into EXACTLY ONE of these values (no other text):
-- "Follow-up Completed"
-- "Delayed Follow-up"
-- "Missed Follow-up"
-- "No Follow-up Required"
-
-Return this as: "follow_up_status": "<one of the four above>"
-
-2. CATEGORY & SUBCATEGORY (STRICT)
+2. CATEGORY & SUBCATEGORY (STRICT):
 Use ONLY the Category → Subcategory reference list below.
-- Category MUST be exactly one of the "Category: ..." names.
-- Subcategory MUST be exactly one of the bullet points under that Category.
-Do NOT invent new names.
-
-Return:
-"category": "<Category from list>",
-"subcategory": "<Subcategory from list>"
+Do NOT invent names; pick the closest best match from the list.
+Return: "category": "<Category>", "subcategory": "<Subcategory>"
 
 REFERENCE LIST:
 ${REFERENCE_LIST}
 
-3. SCORING (0–10 integer each)
-Score the ticket on:
-- follow_up_frequency (0–10)
-- no_drops (0–10)
-- sla_adherence (0–10)
-- resolution_quality (0–10)
-- customer_sentiment (0–10)
-- agent_tone (0–10)
+3. SCORING (0–10 each, integers):
+- Follow-Up Frequency
+- No Drops
+- SLA Adherence
+- Resolution Quality
+- Customer Sentiment (0–10)
+- Agent Tone (0–10)
 
-4. REASONS PER SCORE
-For EACH score above, provide a 1–2 sentence explanation:
-- score_reasons.follow_up_frequency
-- score_reasons.no_drops
-- score_reasons.sla_adherence
-- score_reasons.resolution_quality
-- score_reasons.customer_sentiment
-- score_reasons.agent_tone
+Also provide a SHORT reason for each score in a "score_reasons" object.
 
-5. FINAL AI TICKET SCORE (0–10)
-Compute an overall final_score considering:
+4. FINAL AI TICKET SCORE (0–10 weighted):
 - Follow-Up 15%
 - No Drops 15%
 - SLA 20%
-- Resolution Quality 20%
-- Customer Sentiment 15%
-- Agent Tone 15%
+- Resolution 20%
+- Sentiment 15%
+- Tone 15%
 
-Also provide a short overall explanation summarizing why the final_score and follow_up_status were chosen.
-
-Return a SINGLE JSON object ONLY, no markdown, matching this shape:
-
+Return a single JSON object only, with keys:
 {
   "title": "Ticket Follow-up Analysis",
-  "follow_up_status": "Follow-up Completed | Delayed Follow-up | Missed Follow-up | No Follow-up Required",
-  "category": "string (from reference list)",
-  "subcategory": "string (from reference list)",
+  "follow_up_status": "...",
+  "category": "...",
+  "subcategory": "...",
   "scores": {
     "follow_up_frequency": 0,
     "no_drops": 0,
@@ -233,65 +208,29 @@ Return a SINGLE JSON object ONLY, no markdown, matching this shape:
     "agent_tone": 0
   },
   "score_reasons": {
-    "follow_up_frequency": "string",
-    "no_drops": "string",
-    "sla_adherence": "string",
-    "resolution_quality": "string",
-    "customer_sentiment": "string",
-    "agent_tone": "string"
+    "follow_up_frequency": "...",
+    "no_drops": "...",
+    "sla_adherence": "...",
+    "resolution_quality": "...",
+    "customer_sentiment": "...",
+    "agent_tone": "..."
   },
   "final_score": 0,
-  "reasons": "one brief paragraph"
+  "reasons": "one brief paragraph explaining overall assessment"
 }
 
-Ticket context:
+Ticket:
 Subject: ${subject}
 Status: ${status}
 Priority: ${priority}
 Channel: ${channel}
 Department: ${department}
-
-Full conversation + notes:
+Conversation:
 ${conversation}
 `;
-}
 
-// ---- HELPERS --------------------------------------------------------
-
-// Normalize AI follow_up_status to your 4 picklist values
-function normalizeFollowUpStatus(aiStatus) {
-  if (!aiStatus) return "No Commitment Found";
-
-  const s = String(aiStatus).toLowerCase();
-
-  if (s.includes("follow-up completed") || s.includes("follow up completed") || s.includes("completed")) {
-    return "Follow-up Completed";
-  }
-  if (s.includes("delayed")) {
-    return "Delayed Follow-up";
-  }
-  if (s.includes("missed")) {
-    return "Missed Follow-up";
-  }
-  if (s.includes("no follow-up required") ||
-      s.includes("no follow up required") ||
-      s.includes("no follow-up needed") ||
-      s.includes("no follow up needed") ||
-      s.includes("no commitment")) {
-    return "No Follow-up Required";
-  }
-  // Safe default when unsure
-  return "No Commitment Found";
-}
-
-// OpenAI call using json_object response
-async function callOpenAI(payload) {
-  if (!OPENAI_API_KEY) {
-    throw new Error("Missing OPENAI_API_KEY env var");
-  }
-
-  const prompt = PROMPT(payload);
-
+// ------------ OPENAI CALL ------------
+async function callOpenAI(prompt) {
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -301,152 +240,303 @@ async function callOpenAI(payload) {
     body: JSON.stringify({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
+      temperature: 0.2,
       messages: [
         { role: "system", content: "Only output valid JSON that matches the requested schema." },
         { role: "user", content: prompt }
-      ],
-      temperature: 0.2
+      ]
     })
   });
 
-  const data = await r.json();
   if (!r.ok) {
-    console.error("OpenAI error:", data);
-    throw new Error(`OpenAI error ${r.status}`);
+    const text = await r.text().catch(() => "");
+    throw new Error(`OpenAI error ${r.status}: ${text}`);
   }
 
-  const content = data.choices?.[0]?.message?.content || "{}";
-  console.log("Raw OpenAI JSON:", content.slice(0, 1000));
-  return JSON.parse(content);
+  const data = await r.json();
+  return JSON.parse(data.choices[0].message.content);
 }
 
-// Map AI result → Zoho Desk custom fields & PATCH ticket
-async function updateZohoDeskTicket(ticketId, ai) {
-  if (!DESK_ORG_ID || !DESK_OAUTH_TOKEN) {
-    throw new Error("Missing DESK_ORG_ID or DESK_OAUTH_TOKEN env vars");
+// ------------ FOLLOW-UP STATUS NORMALISATION ------------
+function normalizeFollowUpStatus(raw) {
+  if (!raw) return "No Commitment Found";
+  const t = raw.toString().toLowerCase().trim();
+
+  const map = {
+    "follow-up completed": "Follow-up Completed",
+    "follow up completed": "Follow-up Completed",
+    "completed": "Follow-up Completed",
+
+    "delayed follow-up": "Delayed Follow-up",
+    "delayed follow up": "Delayed Follow-up",
+    "delayed": "Delayed Follow-up",
+
+    "missed follow-up": "Missed Follow-up",
+    "missed follow up": "Missed Follow-up",
+    "missed": "Missed Follow-up",
+
+    "no commitment found": "No Commitment Found",
+    "no follow-up required": "No Commitment Found",
+    "no follow up required": "No Commitment Found",
+    "none": "No Commitment Found"
+  };
+
+  for (const [k, v] of Object.entries(map)) {
+    if (t === k || t.includes(k)) return v;
+  }
+  return "No Commitment Found";
+}
+
+// ------------ OWNER CHANGE LOG PARSING ------------
+function safeDate(str) {
+  if (!str) return null;
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// line format example:
+// "Owner changed to Chloe Finn (Tech OB) on 2025-11-18 21:30:23"
+function parseOwnerChangeLog(logText, createdIso, closedIso) {
+  if (!logText || typeof logText !== "string") return { segments: [] };
+
+  const created = safeDate(createdIso);
+  const closed = safeDate(closedIso);
+
+  const lines = logText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const entries = [];
+
+  const re = /Owner changed to (.+?)(?: \((.+?)\))? on (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/i;
+
+  for (const line of lines) {
+    const m = line.match(re);
+    if (!m) continue;
+    const owner = m[1].trim();
+    const role = (m[2] || "Unknown").trim();
+    const when = safeDate(m[3].replace(" ", "T") + "Z"); // treat as UTC
+    if (!when) continue;
+    entries.push({ owner, role, when });
   }
 
-  const scores  = ai.scores        || {};
-  const reasons = ai.score_reasons || {};
+  if (entries.length === 0) return { segments: [] };
 
-  const followUpStatus = normalizeFollowUpStatus(ai.follow_up_status);
+  entries.sort((a, b) => a.when - b.when);
 
-  // NOTE: keys below are DISPLAY NAMES of your custom fields
+  const segments = [];
+  for (let i = 0; i < entries.length; i++) {
+    const cur = entries[i];
+    const next = entries[i + 1];
+    const from = cur.when;
+    let to;
+
+    if (next) {
+      to = next.when;
+    } else if (closed) {
+      to = closed;
+    } else {
+      to = new Date(); // fallback
+    }
+
+    const hours = Math.max(0, (to - from) / 3_600_000);
+    segments.push({
+      owner: cur.owner,
+      role: cur.role,
+      from: from.toISOString(),
+      to: to.toISOString(),
+      hours
+    });
+  }
+
+  if (created && created < new Date(segments[0].from)) {
+    const first = segments[0];
+    const extraHours = Math.max(0, (new Date(first.from) - created) / 3_600_000);
+    first.from = created.toISOString();
+    first.hours += extraHours;
+  }
+
+  return { segments };
+}
+
+function summarizeOwnerTime(parsed) {
+  const segments = parsed.segments || [];
+  const byUser = {};
+  const byRole = {};
+  let totalHours = 0;
+
+  for (const seg of segments) {
+    const h = seg.hours || 0;
+    totalHours += h;
+
+    if (seg.owner) {
+      byUser[seg.owner] = (byUser[seg.owner] || 0) + h;
+    }
+    const role = seg.role || "Unknown";
+    byRole[role] = (byRole[role] || 0) + h;
+  }
+
+  return { segments, byUser, byRole, totalHours };
+}
+
+function buildOwnerTimeRemark(ownerTime) {
+  if (!ownerTime || !ownerTime.byRole || Object.keys(ownerTime.byRole).length === 0) {
+    return "Owner time could not be determined from the Owner Change Log.";
+  }
+
+  let topRole = null;
+  let topHours = 0;
+  let total = 0;
+
+  for (const [role, hrs] of Object.entries(ownerTime.byRole)) {
+    total += hrs;
+    if (hrs > topHours) {
+      topHours = hrs;
+      topRole = role;
+    }
+  }
+
+  if (!topRole || total === 0) {
+    return "Owner time could not be determined from the Owner Change Log.";
+  }
+
+  const pct = Math.round((topHours / total) * 100);
+  return `Most of this ticket's time (${topHours.toFixed(1)} hours, ${pct}% of total) was spent with the ${topRole} team. Please refer to the Owner Change Log for full history.`;
+}
+
+// ------------ ZOHO DESK UPDATE ------------
+async function updateZohoDeskTicket({ ticketId, aiResult, ownerTimeRemark }) {
+  if (!ZOHO_DESK_OAUTH || !ZOHO_DESK_ORG_ID) {
+    console.warn("⚠️ Zoho Desk env vars not set, skipping update");
+    return { skipped: true };
+  }
+  if (!ticketId) {
+    console.warn("⚠️ No ticketId provided for Desk update");
+    return { skipped: true };
+  }
+
+  const scores = aiResult.scores || {};
+  const scoreReasons = aiResult.score_reasons || {};
+
+  const followUpStatus = normalizeFollowUpStatus(aiResult.follow_up_status);
+
+  // These keys are *field labels* in your Zoho layout.
   const customFields = {
-    // classification
-    "AI Category": ai.category || "",
-    "AI Sub Category": ai.subcategory || "",
-    "AI Category explanation": ai.reasons || "",
-    "AI Final Score": ai.final_score ?? null,
-
-    // follow-up status picklist
+    // main AI labels
     "Follow-up Status": followUpStatus,
+    "AI Category": aiResult.category || "",
+    "AI Sub Category": aiResult.subcategory || "",
+    "AI Final Score": aiResult.final_score ?? null,
+    "AI Category explanation": aiResult.reasons || "",
 
     // numeric scores
     "Follow-Up Frequency": scores.follow_up_frequency ?? null,
-    "No Drops Score":      scores.no_drops ?? null,
-    "SLA Adherence":       scores.sla_adherence ?? null,
-    "Resolution Quality":  scores.resolution_quality ?? null,
-    "Customer Sentiment":  scores.customer_sentiment ?? null,
-    "Agent Tone":          scores.agent_tone ?? null,
+    "No Drops Score": scores.no_drops ?? null,
+    "SLA Adherence": scores.sla_adherence ?? null,
+    "Resolution Quality": scores.resolution_quality ?? null,
+    "Customer Sentiment": scores.customer_sentiment ?? null,
+    "Agent Tone": scores.agent_tone ?? null,
 
-    // textual reasons
-    "Reason Follow-Up Frequency": reasons.follow_up_frequency || "",
-    "Reason No Drops":            reasons.no_drops || "",
-    "Reasons SLA Adherence":      reasons.sla_adherence || "",
-    "Reason Resolution Quality":  reasons.resolution_quality || "",
-    "Reason Customer Sentiment":  reasons.customer_sentiment || "",
-    "Reason Agent Tone":          reasons.agent_tone || "",
+    // per-score reasons
+    "Reason Follow-Up Frequency": scoreReasons.follow_up_frequency || "",
+    "Reason No Drops": scoreReasons.no_drops || "",
+    "Reasons SLA Adherence": scoreReasons.sla_adherence || "",
+    "Reason Resolution Quality": scoreReasons.resolution_quality || "",
+    "Reason Customer Sentiment": scoreReasons.customer_sentiment || "",
+    "Reason Agent Tone": scoreReasons.agent_tone || "",
+
+    // 👇 Owner time remark → your multiline "TS Resolution" (API name cf_ts_resolution)
+    "TS Resolution": ownerTimeRemark || ""
   };
-
-  // Drop undefined
-  Object.keys(customFields).forEach((k) => {
-    if (customFields[k] === undefined) delete customFields[k];
-  });
 
   const body = { customFields };
 
-  const url = `${DESK_BASE_URL}/tickets/${ticketId}`;
+  const url = `${ZOHO_DESK_BASE_URL}/tickets/${ticketId}`;
+
   const resp = await fetch(url, {
-    method: "PATCH",
+    method: "PUT",
     headers: {
-      "Content-Type": "application/json",
-      orgId: DESK_ORG_ID,
-      Authorization: `Zoho-oauthtoken ${DESK_OAUTH_TOKEN}`,
+      "Authorization": `Zoho-oauthtoken ${ZOHO_DESK_OAUTH}`,
+      "orgId": ZOHO_DESK_ORG_ID,
+      "Content-Type": "application/json"
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(body)
   });
 
-  const data = await resp.json();
-  return { status: resp.status, data };
+  const data = await resp.json().catch(() => ({}));
+
+  if (!resp.ok) {
+    console.error("❌ Zoho Desk update failed", resp.status, data);
+    throw new Error(`Zoho Desk update error ${resp.status}`);
+  }
+
+  console.log("✅ Zoho Desk update response:", JSON.stringify(data).slice(0, 2000));
+  return data;
 }
 
-// ---- ROUTES ---------------------------------------------------------
+// ------------ HEALTH CHECK ------------
+app.get("/", (_req, res) => {
+  res.send("✅ Railway app is live!");
+});
 
-// health check
-app.get("/", (_req, res) => res.send("✅ Railway app is live!"));
-
-// main Desk webhook
+// ------------ MAIN WEBHOOK ------------
 app.post("/desk-webhook", async (req, res) => {
   try {
-    const headerSecret =
-      req.headers["desk-shared-secret"] ||
-      req.headers["desk_shared_secret"];
-
-    if (!DESK_SHARED_SECRET) {
-      console.error("DESK_SHARED_SECRET not configured");
-      return res.status(500).json({ error: "Server misconfigured" });
-    }
-
-    if (!headerSecret || headerSecret !== DESK_SHARED_SECRET) {
-      console.warn("Unauthorized webhook hit, bad secret:", headerSecret);
+    const secret = req.headers["desk-shared-secret"];
+    if (!secret || secret !== DESK_SHARED_SECRET) {
+      console.warn("❌ Unauthorized webhook hit");
       return res.status(403).json({ error: "Unauthorized" });
     }
 
-    const payload = req.body || {};
-    const ticketId = payload.ticket_id;
+    const body = req.body || {};
+    const {
+      ticket_id,
+      subject = "N/A",
+      status = "N/A",
+      priority = "N/A",
+      channel = "N/A",
+      department = "N/A",
+      conversation = "",
+      owner_change_log = "",
+      ticket_created_time = null,
+      ticket_closed_time = null
+    } = body;
 
-    if (!ticketId) {
-      return res.status(400).json({ error: "ticket_id missing in payload" });
-    }
+    console.log("🎯 Webhook for ticket:", ticket_id, "| Subject:", subject);
 
-    console.log(
-      "Webhook hit for ticket:",
-      ticketId,
-      "subject:",
-      (payload.subject || "").slice(0, 100)
-    );
+    const prompt = PROMPT({ subject, status, priority, channel, department, conversation });
+    const ai = await callOpenAI(prompt);
+    console.log("🤖 AI result:", JSON.stringify(ai).slice(0, 2000));
 
-    // 1) Call OpenAI with your strict prompt
-    const ai = await callOpenAI(payload);
-    console.log("AI result:", JSON.stringify(ai).slice(0, 1500));
+    const parsedOwner = parseOwnerChangeLog(owner_change_log, ticket_created_time, ticket_closed_time);
+    const ownerTime = summarizeOwnerTime(parsedOwner);
+    console.log("⏱ Owner time summary:", ownerTime);
+    const ownerRemark = buildOwnerTimeRemark(ownerTime);
+    console.log("📝 Owner remark:", ownerRemark);
 
-    // 2) Update Zoho Desk ticket with scores + reasons + category/subcategory
-    let deskResult;
+    let deskUpdate = null;
     try {
-      deskResult = await updateZohoDeskTicket(ticketId, ai);
-      console.log(
-        "Desk update response:",
-        JSON.stringify(deskResult).slice(0, 1500)
-      );
-    } catch (deskErr) {
-      console.error("Zoho Desk update failed:", deskErr);
-      deskResult = { status: 500, data: { error: String(deskErr) } };
+      deskUpdate = await updateZohoDeskTicket({
+        ticketId: ticket_id,
+        aiResult: ai,
+        ownerTimeRemark: ownerRemark
+      });
+    } catch (e) {
+      console.error("Zoho Desk update error (non-fatal for webhook):", e.message);
     }
 
-    // 3) Respond back so Deluge can log
     return res.json({
       ok: true,
       ai,
-      desk: deskResult,
+      owner_time: ownerTime,
+      owner_remark: ownerRemark,
+      desk_update: deskUpdate
     });
-  } catch (e) {
-    console.error("Webhook error:", e);
-    return res.status(500).json({ ok: false, error: e.message });
+  } catch (err) {
+    console.error("Webhook error:", err);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// ---- START SERVER ---------------------------------------------------
-
+// ------------ START SERVER ------------
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log("Server running on port", PORT));
+app.listen(PORT, () => {
+  console.log("🚀 Server running on port", PORT);
+});
