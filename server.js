@@ -443,7 +443,7 @@ async function updateZohoDeskTicket({ ticketId, aiResult, ownerTimeRemark }) {
     "Reason Agent Tone": scoreReasons.agent_tone || "",
 
     // 👇 Owner time remark → your multiline "TS Resolution" (API name cf_ts_resolution)
-     "Remarks-OC Log": ownerTimeRemark || ""
+    "TS Resolution": ownerTimeRemark || ""
   };
 
   const body = { customFields };
