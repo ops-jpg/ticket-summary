@@ -299,27 +299,31 @@ function normalizeFollowUpStatus(raw) {
 }
 
 // ---- Update Zoho Desk ticket ----
+// ---- Update Zoho Desk ticket ----
 async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
   if (!ZOHO_OAUTH_TOKEN || !ZOHO_ORG_ID) {
     console.warn("ZOHO_OAUTH_TOKEN or ZOHO_ORG_ID missing; skipping Desk update.");
     return { skipped: true };
   }
 
-  const scores = aiResult.scores || {};
+  const scores       = aiResult.scores || {};
   const scoreReasons = aiResult.score_reasons || {};
-  const followUpStatus = normalizeFollowUpStatus(aiResult.follow_up_status);
-  const ownerTimeRemark = aiResult.owner_time_summary || "";
+  const followUpStatus   = normalizeFollowUpStatus(aiResult.follow_up_status);
 
-  console.log("Owner time remark:", ownerTimeRemark);
+  const ownerTimeRemark  = aiResult.owner_time_summary || ""; // <- goes to Remarks-OC Log
+  const aiMainSummary    = aiResult.reasons || "";            // <- normal AI summary paragraph
 
-  // customFields by display name
+  // 🔹 Brief AI Summary will stay as just the AI explanation text
+  const briefSummary = aiMainSummary;
+
+  // ---- CUSTOM FIELDS BY LABEL ----
   const customFields = {
     // MAIN AI LABELS
     "Follow-up Status": followUpStatus,
     "AI Category": aiResult.category || "",
     "AI Sub Category": aiResult.subcategory || "",
     "AI Final Score": aiResult.final_score ?? null,
-    "AI Category explanation": aiResult.reasons || "",
+    "AI Category explanation": briefSummary,   // Brief AI Summary field (no owner time here)
 
     // NUMERIC SCORES
     "Follow-Up Frequency": scores.follow_up_frequency ?? null,
@@ -337,19 +341,27 @@ async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
     "Reason Customer Sentiment": scoreReasons.customer_sentiment || "",
     "Reason Agent Tone": scoreReasons.agent_tone || "",
 
-    "Remarks-OC Log": ownerTimeRemark || "",
+    // ⭐ This is the ONLY place we put the owner-time summary (by label)
+    "Remarks-OC Log": ownerTimeRemark,
   };
 
+  // ---- API-NAME FIELDS ----
   const body = {
-    // We normally leave status as-is; only touching custom fields
     customFields,
-    // ALSO update via API-name map, to be 100% sure:
     cf: {
-      cf_ts_resolution: ownerTimeRemark || "",
+      // Brief AI Summary – your screenshot API name
+      cf_ai_category_explanation: briefSummary,
+
+      // ⭐ Remarks-OC Log – make sure API name matches your field!
+      // If your API name is different, adjust this key.
+      cf_remarks_oc_log: ownerTimeRemark,
+
+      // keep this if you're still using cf_ts_resolution anywhere, otherwise you can drop it
+      cf_ts_resolution: ownerTimeRemark,
     },
   };
 
-  console.log("Desk update payload:", JSON.stringify(body).slice(0, 800));
+  console.log("Desk update payload:", JSON.stringify(body).slice(0, 700));
 
   const r = await fetch(`https://desk.zoho.com/api/v1/tickets/${ticketId}`, {
     method: "PATCH",
