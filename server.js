@@ -148,7 +148,7 @@ Category: Installations
 - V3 migration setup
 - Bluetooth headset installation`;
 
-// ---- PROMPT (includes owner-change log) ----
+// ---- PROMPT (includes time per user & time per role) ----
 const PROMPT = ({
   subject,
   status,
@@ -211,6 +211,22 @@ You DO NOT need exact hours. A brief summary like
 is enough.
 Return this as: "owner_time_summary": "<short remark>"
 
+6. TIME SPENT PER USER (MULTILINE TEXT):
+Using the Owner Change Log, estimate time spent *per individual user/agent*.
+Return a multiline string like:
+"Mannat - 3 hrs
+Shikha - 2 hrs"
+Use whole hours or half-hours (e.g. 1.5 hrs) as approximate values.
+Return this as: "time_spent_per_user": "<multiline string>"
+
+7. TIME SPENT PER ROLE (MULTILINE TEXT):
+Using the Owner Change Log, estimate time spent *per role/team*.
+Return a multiline string like:
+"Escalation Manager - 1 hr
+Adit Pay - 2 hrs"
+(Use the role/team names as they appear or can be reasonably inferred.)
+Return this as: "time_spent_per_role": "<multiline string>"
+
 Return a single JSON object only, with keys:
 {
   "title": "Ticket Follow-up Analysis",
@@ -235,7 +251,9 @@ Return a single JSON object only, with keys:
   },
   "final_score": 0,
   "reasons": "one brief paragraph",
-  "owner_time_summary": "one short sentence about which team/owner had the ticket longest"
+  "owner_time_summary": "one short sentence about which team/owner had the ticket longest",
+  "time_spent_per_user": "Mannat - 3 hrs\\nShikha - 2 hrs",
+  "time_spent_per_role": "Escalation Manager - 1 hr\\nAdit Pay - 2 hrs"
 }
 
 Ticket:
@@ -299,21 +317,24 @@ function normalizeFollowUpStatus(raw) {
 }
 
 // ---- Update Zoho Desk ticket ----
-// ---- Update Zoho Desk ticket ----
 async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
   if (!ZOHO_OAUTH_TOKEN || !ZOHO_ORG_ID) {
     console.warn("ZOHO_OAUTH_TOKEN or ZOHO_ORG_ID missing; skipping Desk update.");
     return { skipped: true };
   }
 
-  const scores       = aiResult.scores || {};
-  const scoreReasons = aiResult.score_reasons || {};
-  const followUpStatus   = normalizeFollowUpStatus(aiResult.follow_up_status);
+  const scores          = aiResult.scores || {};
+  const scoreReasons    = aiResult.score_reasons || {};
+  const followUpStatus  = normalizeFollowUpStatus(aiResult.follow_up_status);
 
-  const ownerTimeRemark  = aiResult.owner_time_summary || ""; // <- goes to Remarks-OC Log
-  const aiMainSummary    = aiResult.reasons || "";            // <- normal AI summary paragraph
+  const ownerTimeRemark = aiResult.owner_time_summary || ""; // <- goes to Remarks-OC Log
+  const aiMainSummary   = aiResult.reasons || "";            // <- normal AI summary paragraph
 
-  // 🔹 Brief AI Summary will stay as just the AI explanation text
+  // New: multiline text for time spent breakdowns
+  const timeSpentPerUser = aiResult.time_spent_per_user || ""; // e.g. "Mannat - 3 hrs\nShikha - 2 hrs"
+  const timeSpentPerRole = aiResult.time_spent_per_role || ""; // e.g. "Escalation Manager - 1 hr\nAdit Pay - 2 hrs"
+
+  // Brief AI Summary remains just the explanation text
   const briefSummary = aiMainSummary;
 
   // ---- CUSTOM FIELDS BY LABEL ----
@@ -341,23 +362,31 @@ async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
     "Reason Customer Sentiment": scoreReasons.customer_sentiment || "",
     "Reason Agent Tone": scoreReasons.agent_tone || "",
 
-    // ⭐ This is the ONLY place we put the owner-time summary (by label)
+    // Short owner time remark
     "Remarks-OC Log": ownerTimeRemark,
+
+    // NEW: human-readable multiline fields (Zoho Desk LABEL names)
+    "Time Spent per User": timeSpentPerUser,
+    "Time Spent per Role": timeSpentPerRole,
   };
 
   // ---- API-NAME FIELDS ----
   const body = {
     customFields,
     cf: {
-      // Brief AI Summary – your screenshot API name
+      // Brief AI Summary – API name
       cf_ai_category_explanation: briefSummary,
 
-      // ⭐ Remarks-OC Log – make sure API name matches your field!
-      // If your API name is different, adjust this key.
+      // Remarks-OC Log – API name
       cf_remarks_oc_log: ownerTimeRemark,
 
-      // keep this if you're still using cf_ts_resolution anywhere, otherwise you can drop it
+      // Legacy / existing mapping if used elsewhere
       cf_ts_resolution: ownerTimeRemark,
+
+      // NEW: API names for multiline fields
+      // ⚠️ Make sure these API names match your Zoho Desk custom field API names.
+      cf_time_spent_per_user: timeSpentPerUser,
+      cf_time_spent_per_role: timeSpentPerRole,
     },
   };
 
