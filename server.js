@@ -366,8 +366,8 @@ async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
     "Remarks-OC Log": ownerTimeRemark,
 
     // NEW: human-readable multiline fields (Zoho Desk LABEL names)
-    "Time Spent per User": timeSpentPerUser,
-    "Time Spent per Role": timeSpentPerRole,
+    "Time Spent Per User": timeSpentPerUser,
+    "Time Spent Per Role": timeSpentPerRole,
   };
 
   // ---- API-NAME FIELDS ----
