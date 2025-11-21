@@ -384,9 +384,9 @@ async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
       cf_ts_resolution: ownerTimeRemark,
 
       // NEW: API names for multiline fields
-      // ⚠️ Make sure these API names match your Zoho Desk custom field API names.
-      cf_time_spent_per_user: timeSpentPerUser,
-      cf_time_spent_per_role: timeSpentPerRole,
+      //  Make sure these API names match your Zoho Desk custom field API names.
+      cf_csm_resolution: timeSpentPerUser,
+      cf_voip_resolution: timeSpentPerRole,
     },
   };
 
