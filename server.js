@@ -178,6 +178,8 @@ Return: "category": "<Category>", "subcategory": "<Subcategory>"
 REFERENCE LIST:
 ${REFERENCE_LIST}
 
+
+
 3. SCORING (0–10 each, integers):
 - Follow-Up Frequency
 - No Drops
@@ -186,6 +188,21 @@ ${REFERENCE_LIST}
 - Customer Sentiment (0–10, treat -10..+10 notes as 0..10)
 - Agent Tone
 
+IMPORTANT: For **SLA Adherence**, you MUST use this fixed rule based on timestamps in the Conversation:
+
+- Find the first customer message time.
+- Find the time of the **first agent reply** → this gap is the **First Response Time**.
+- Find the time of the **final resolving agent message / note or clear resolution** → from first customer message to this point is the **Resolution Time**.
+
+Rule:
+- If First Response Time is **less than 30 minutes** AND Resolution Time is **less than 4 hours**, then:
+  - Set "sla_adherence" to **10**.
+  - In "sla_adherence" reason, clearly say it was **Within SLA (first response <30 mins and resolution <4 hrs)**.
+- Otherwise (if either first response ≥30 minutes OR resolution ≥4 hours):
+  - Set "sla_adherence" to **4**.
+  - In the reason, clearly say **SLA breached** and specify whether first response, resolution, or both breached.
+
+Do NOT use any other scheme for the SLA Adherence score.
 Also provide a short 1–2 sentence reason for *each* score:
 "score_reasons": {
   "follow_up_frequency": "...",
