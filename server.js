@@ -13,6 +13,74 @@ const OPENAI_API_KEY     = process.env.OPENAI_API_KEY;
 const ZOHO_ORG_ID        = process.env.ZOHO_ORG_ID;
 const ZOHO_OAUTH_TOKEN   = process.env.ZOHO_OAUTH_TOKEN;
 
+// ================== BUSINESS HOURS CONFIG (CST) ==================
+const BUSINESS_TZ_OFFSET_HOURS = -6;          // CST offset from UTC
+const BUSINESS_START_HOUR      = 8;           // 08:00
+const BUSINESS_END_HOUR        = 18;          // 18:00
+const BUSINESS_DAYS            = [1, 2, 3, 4, 5]; // Mon–Fri
+
+// Helper: compute business minutes between two ISO datetimes
+function businessMinutesBetween(startISO, endISO) {
+  if (!startISO || !endISO) return 0;
+
+  const start = new Date(startISO);
+  const end   = new Date(endISO);
+  if (isNaN(start) || isNaN(end) || end <= start) return 0;
+
+  const offsetMs = BUSINESS_TZ_OFFSET_HOURS * 60 * 60 * 1000;
+  let totalMs = 0;
+
+  let currentMs = start.getTime();
+  const endMs   = end.getTime();
+
+  while (currentMs < endMs) {
+    // Shift to "business local" (CST) timeline by adding offset
+    const currentLocal = new Date(currentMs + offsetMs);
+
+    const day = currentLocal.getUTCDay(); // 0–6, but now in CST day
+    if (BUSINESS_DAYS.includes(day)) {
+      const y = currentLocal.getUTCFullYear();
+      const m = currentLocal.getUTCMonth();
+      const d = currentLocal.getUTCDate();
+
+      // 08:00 and 18:00 in CST, expressed on our "local" timeline
+      const dayStartLocal = Date.UTC(y, m, d, BUSINESS_START_HOUR, 0, 0);
+      const dayEndLocal   = Date.UTC(y, m, d, BUSINESS_END_HOUR, 0, 0);
+
+      // Convert business window back to real UTC ms
+      const dayStartUtcMs = dayStartLocal - offsetMs;
+      const dayEndUtcMs   = dayEndLocal   - offsetMs;
+
+      const sliceStart = Math.max(currentMs, dayStartUtcMs);
+      const sliceEnd   = Math.min(endMs,   dayEndUtcMs);
+
+      if (sliceEnd > sliceStart) {
+        totalMs += (sliceEnd - sliceStart);
+      }
+    }
+
+    // Jump to next local midnight on the "business" (CST) timeline
+    const nextLocalMidnight = new Date(
+      Date.UTC(
+        currentLocal.getUTCFullYear(),
+        currentLocal.getUTCMonth(),
+        currentLocal.getUTCDate() + 1,
+        0, 0, 0
+      )
+    );
+    const nextUtcMs = nextLocalMidnight.getTime() - offsetMs;
+
+    // Ensure forward progress
+    currentMs = Math.max(currentMs + 1, nextUtcMs);
+  }
+
+  return Math.round(totalMs / 60000); // minutes
+}
+
+function businessHoursBetween(startISO, endISO) {
+  return businessMinutesBetween(startISO, endISO) / 60;
+}
+
 // ---- CATEGORY REFERENCE LIST ----
 const REFERENCE_LIST = `Category: Desktop Phones
 - Phone not ringing when receiving calls
@@ -178,8 +246,6 @@ Return: "category": "<Category>", "subcategory": "<Subcategory>"
 REFERENCE LIST:
 ${REFERENCE_LIST}
 
-
-
 3. SCORING (0–10 each, integers):
 - Follow-Up Frequency
 - No Drops
@@ -188,21 +254,6 @@ ${REFERENCE_LIST}
 - Customer Sentiment (0–10, treat -10..+10 notes as 0..10)
 - Agent Tone
 
-IMPORTANT: For **SLA Adherence**, you MUST use this fixed rule based on timestamps in the Conversation:
-
-- Find the first customer message time.
-- Find the time of the **first agent reply** → this gap is the **First Response Time**.
-- Find the time of the **final resolving agent message / note or clear resolution** → from first customer message to this point is the **Resolution Time**.
-
-Rule:
-- If First Response Time is **less than 30 minutes** AND Resolution Time is **less than 4 hours**, then:
-  - Set "sla_adherence" to **10**.
-  - In "sla_adherence" reason, clearly say it was **Within SLA (first response <30 mins and resolution <4 hrs)**.
-- Otherwise (if either first response ≥30 minutes OR resolution ≥4 hours):
-  - Set "sla_adherence" to **4**.
-  - In the reason, clearly say **SLA breached** and specify whether first response, resolution, or both breached.
-
-Do NOT use any other scheme for the SLA Adherence score.
 Also provide a short 1–2 sentence reason for *each* score:
 "score_reasons": {
   "follow_up_frequency": "...",
@@ -324,13 +375,34 @@ function normalizeFollowUpStatus(raw) {
   const s = raw.toString().toLowerCase();
 
   if (s.includes("completed")) return "Follow-up Completed";
-  if (s.includes("delayed")) return "Delayed Follow-up";
-  if (s.includes("missed")) return "Missed Follow-up";
+  if (s.includes("delayed"))   return "Delayed Follow-up";
+  if (s.includes("missed"))    return "Missed Follow-up";
   if (s.includes("no follow-up required") || s.includes("no commitment"))
     return "No Follow-up Required";
 
   // fallback
   return "No Commitment Found";
+}
+
+// ---- Fetch ticket from Zoho Desk (for SLA dates) ----
+async function fetchDeskTicket(ticketId) {
+  if (!ZOHO_OAUTH_TOKEN || !ZOHO_ORG_ID) return null;
+
+  const r = await fetch(`https://desk.zoho.com/api/v1/tickets/${ticketId}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Zoho-oauthtoken ${ZOHO_OAUTH_TOKEN}`,
+      orgId: ZOHO_ORG_ID,
+    },
+  });
+
+  if (!r.ok) {
+    console.warn("Failed to fetch ticket for SLA calc:", r.status);
+    return null;
+  }
+
+  const data = await r.json().catch(() => null);
+  return data || null;
 }
 
 // ---- Update Zoho Desk ticket ----
@@ -340,18 +412,80 @@ async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
     return { skipped: true };
   }
 
-  const scores          = aiResult.scores || {};
-  const scoreReasons    = aiResult.score_reasons || {};
-  const followUpStatus  = normalizeFollowUpStatus(aiResult.follow_up_status);
+  // Pull out AI structures, but we'll override SLA with our own rule.
+  const scores       = aiResult.scores || {};
+  const scoreReasons = aiResult.score_reasons || {};
+  const followUpStatus = normalizeFollowUpStatus(aiResult.follow_up_status);
 
-  const ownerTimeRemark = aiResult.owner_time_summary || ""; // <- goes to Remarks-OC Log
-  const aiMainSummary   = aiResult.reasons || "";            // <- normal AI summary paragraph
+  const ownerTimeRemark = aiResult.owner_time_summary || ""; // -> Remarks-OC Log
+  const aiMainSummary   = aiResult.reasons || "";            // main AI paragraph
 
-  // New: multiline text for time spent breakdowns
-  const timeSpentPerUser = aiResult.time_spent_per_user || ""; // e.g. "Mannat - 3 hrs\nShikha - 2 hrs"
-  const timeSpentPerRole = aiResult.time_spent_per_role || ""; // e.g. "Escalation Manager - 1 hr\nAdit Pay - 2 hrs"
+  const timeSpentPerUser = aiResult.time_spent_per_user || "";
+  const timeSpentPerRole = aiResult.time_spent_per_role || "";
 
-  // Brief AI Summary remains just the explanation text
+  // ---- SLA ADHERENCE BASED ON BUSINESS HOURS RULE ----
+  let slaScore  = scores.sla_adherence ?? null;
+  let slaReason = scoreReasons.sla_adherence || "";
+
+  try {
+    const ticket = await fetchDeskTicket(ticketId);
+    if (ticket) {
+      const createdTime =
+        ticket.createdTime ||
+        (ticket.customFields && ticket.customFields["Created Time1"]) ||
+        null;
+
+      const cf          = ticket.cf || {};
+      const custom      = ticket.customFields || {};
+
+      const firstResponseTime =
+        cf.cf_first_response_time ||
+        custom["First Response Time"] ||
+        null;
+
+      const closedTime =
+        ticket.closedTime ||
+        cf.cf_closed_time ||
+        custom["Closed Time"] ||
+        null;
+
+      if (createdTime && firstResponseTime && closedTime) {
+        const frMinutes = businessMinutesBetween(createdTime, firstResponseTime);
+        const resHours  = businessHoursBetween(createdTime, closedTime);
+
+        const firstWithin30 = frMinutes <= 30;
+        const resWithin4    = resHours  <= 4;
+
+        const withinSLA = firstWithin30 && resWithin4;
+
+        // Binary scoring rule: full score if both under SLA, else low score
+        slaScore = withinSLA ? 10 : 3;
+
+        const frPretty  = Math.round(frMinutes);
+        const resPretty = resHours.toFixed(1);
+
+        if (withinSLA) {
+          slaReason =
+            `First response in about ${frPretty} business minutes and ` +
+            `resolution in about ${resPretty} business hours; both within SLA ` +
+            `(30 minutes for first response, 4 hours for resolution).`;
+        } else {
+          slaReason =
+            `SLA breached: first response took about ${frPretty} business minutes ` +
+            `and resolution about ${resPretty} business hours, exceeding the ` +
+            `30-minute / 4-hour SLA targets.`;
+        }
+
+        // Override AI values so mappings below pick up these numbers
+        scores.sla_adherence          = slaScore;
+        scoreReasons.sla_adherence    = slaReason;
+      }
+    }
+  } catch (e) {
+    console.error("Error computing SLA adherence:", e);
+  }
+
+  // Brief AI Summary uses the generic explanation only
   const briefSummary = aiMainSummary;
 
   // ---- CUSTOM FIELDS BY LABEL ----
@@ -361,28 +495,28 @@ async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
     "AI Category": aiResult.category || "",
     "AI Sub Category": aiResult.subcategory || "",
     "AI Final Score": aiResult.final_score ?? null,
-    "AI Category explanation": briefSummary,   // Brief AI Summary field (no owner time here)
+    "AI Category explanation": briefSummary,
 
     // NUMERIC SCORES
     "Follow-Up Frequency": scores.follow_up_frequency ?? null,
-    "No Drops Score": scores.no_drops ?? null,
-    "SLA Adherence": scores.sla_adherence ?? null,
-    "Resolution Quality": scores.resolution_quality ?? null,
-    "Customer Sentiment": scores.customer_sentiment ?? null,
-    "Agent Tone": scores.agent_tone ?? null,
+    "No Drops Score":      scores.no_drops            ?? null,
+    "SLA Adherence":       scores.sla_adherence       ?? null,
+    "Resolution Quality":  scores.resolution_quality  ?? null,
+    "Customer Sentiment":  scores.customer_sentiment  ?? null,
+    "Agent Tone":          scores.agent_tone          ?? null,
 
     // PER-SCORE REASONS
     "Reason Follow-Up Frequency": scoreReasons.follow_up_frequency || "",
-    "Reason No Drops": scoreReasons.no_drops || "",
-    "Reasons SLA Adherence": scoreReasons.sla_adherence || "",
-    "Reason Resolution Quality": scoreReasons.resolution_quality || "",
-    "Reason Customer Sentiment": scoreReasons.customer_sentiment || "",
-    "Reason Agent Tone": scoreReasons.agent_tone || "",
+    "Reason No Drops":            scoreReasons.no_drops            || "",
+    "Reasons SLA Adherence":      scoreReasons.sla_adherence       || "",
+    "Reason Resolution Quality":  scoreReasons.resolution_quality  || "",
+    "Reason Customer Sentiment":  scoreReasons.customer_sentiment  || "",
+    "Reason Agent Tone":          scoreReasons.agent_tone          || "",
 
-    // Short owner time remark
+    // Owner time remark
     "Remarks-OC Log": ownerTimeRemark,
 
-    // NEW: human-readable multiline fields (Zoho Desk LABEL names)
+    // Human-readable multiline fields (labels)
     "Time Spent Per User": timeSpentPerUser,
     "Time Spent Per Role": timeSpentPerRole,
   };
@@ -400,9 +534,8 @@ async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
       // Legacy / existing mapping if used elsewhere
       cf_ts_resolution: ownerTimeRemark,
 
-      // NEW: API names for multiline fields
-      //  Make sure these API names match your Zoho Desk custom field API names.
-      cf_csm_resolution: timeSpentPerUser,
+      // Multiline breakdowns – make sure these match your Desk API names
+      cf_csm_resolution:  timeSpentPerUser,
       cf_voip_resolution: timeSpentPerRole,
     },
   };
