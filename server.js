@@ -1,222 +1,92 @@
+// server.js
 import express from "express";
 import crypto from "crypto";
 
-// Node 18+ has global fetch. If not, uncomment next line:
+// Node 18+ has global fetch.
+// If you are on an older Node, install node-fetch and uncomment:
 // import fetch from "node-fetch";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
-// ---- ENV VARS ----
+// ------------ ENV VARS ------------
 const DESK_SHARED_SECRET = process.env.DESK_SHARED_SECRET;
 const OPENAI_API_KEY     = process.env.OPENAI_API_KEY;
 const ZOHO_ORG_ID        = process.env.ZOHO_ORG_ID;
 const ZOHO_OAUTH_TOKEN   = process.env.ZOHO_OAUTH_TOKEN;
 
-// ================== BUSINESS HOURS CONFIG (CST) ==================
-const BUSINESS_TZ_OFFSET_HOURS = -6;          // CST offset from UTC
-const BUSINESS_START_HOUR      = 8;           // 08:00
-const BUSINESS_END_HOUR        = 18;          // 18:00
-const BUSINESS_DAYS            = [1, 2, 3, 4, 5]; // Mon–Fri
+// ------------ CATEGORY / SUBCATEGORY / ISSUE SUMMARY LIST ------------
+// Format: for EACH row from your spreadsheet:
+// Category: <Category>
+// - <Subcategory>: <Issue Summary>
+//
+// Below are some examples from your xlsx. Continue this pattern
+// until ALL rows from the sheet are covered.
 
-// Helper: compute business minutes between two ISO datetimes
-function businessMinutesBetween(startISO, endISO) {
-  if (!startISO || !endISO) return 0;
+const REFERENCE_LIST = `
+Category: OS Issue
+- Mapping: Appointment mapping not synced correctly with EHR.
+- Configuration: Configuration mismatch between ADIT and EHR.
+- Appointment Write problem into EHR: Appointment write-back to EHR is failing.
+- Wrong Appointment Time: Appointments show wrong time between ADIT and EHR.
+- Slot Missing: Appointment slots missing compared to EHR.
+- Slot Available on Block / Holiday: Blocked/holiday slots still appear available.
+- Provider Hours missing: Provider hours not created on schedule.
+- Operatory Hours Missing: Operatory open hours not matching EHR schedule.
+- Business hours Missing: Business hours mismatch between EHR and ADIT.
+- Incorrect Slots appear: Slots not blocked correctly on EHR.
+- Forms configuration issue: Webforms not configured properly for online scheduling.
 
-  const start = new Date(startISO);
-  const end   = new Date(endISO);
-  if (isNaN(start) || isNaN(end) || end <= start) return 0;
+Category: Engage Issue
+- Appointment Reminder isn't received: Patients not receiving appointment reminders.
+- Appointment Reminder Setup Issue: Appointment reminders not configured correctly.
+- Appointment Reminder with incorrect time: Appointment reminders going at wrong time or due to reschedule.
+- Appointment Reminder with delay: Appointment reminders not sent at correct time.
+- Appointment Reminder (Filters / SC not toggled): SC not toggled or advanced filters blocking reminders.
+- Schedule Confirmation Setup Issue: Schedule confirmation not configured correctly.
+- Patient Forms missing on SC: Patient forms were not added on SC.
+- Appointment reminder CRON issue: Reminder CRON service issue; reminders not sending.
+- Schedule confirmation CRON issue: Schedule confirmation CRON not working.
 
-  const offsetMs = BUSINESS_TZ_OFFSET_HOURS * 60 * 60 * 1000;
-  let totalMs = 0;
+Category: Desktop Phones
+- Phone not ringing when receiving calls: Desktop phone does not ring on inbound calls.
+- Unable to make outbound calls: Desktop phone cannot place outbound calls.
+- Account not registered / logged out: SIP account not registered or phone logged out.
+- Keys not responding or malfunctioning: Phone keys or buttons not working correctly.
+- Phone not powering on / random shutdowns: Device not powering on or keeps shutting down.
+- Call park not working: Call park feature not functioning on desktop phone.
+- Firmware not updating or stuck update: Phone firmware update fails or is stuck.
+- Receiver not working / no audio: No audio in handset/receiver.
+- Faulty handset or LAN ports: Hardware issue with handset or LAN ports.
+- LAN cable damaged / loose: LAN cable issue causing connectivity problems.
+- Bluetooth headset not connecting: Bluetooth headset pairing/connection issues.
 
-  let currentMs = start.getTime();
-  const endMs   = end.getTime();
-
-  while (currentMs < endMs) {
-    // Shift to "business local" (CST) timeline by adding offset
-    const currentLocal = new Date(currentMs + offsetMs);
-
-    const day = currentLocal.getUTCDay(); // 0–6, but now in CST day
-    if (BUSINESS_DAYS.includes(day)) {
-      const y = currentLocal.getUTCFullYear();
-      const m = currentLocal.getUTCMonth();
-      const d = currentLocal.getUTCDate();
-
-      // 08:00 and 18:00 in CST, expressed on our "local" timeline
-      const dayStartLocal = Date.UTC(y, m, d, BUSINESS_START_HOUR, 0, 0);
-      const dayEndLocal   = Date.UTC(y, m, d, BUSINESS_END_HOUR, 0, 0);
-
-      // Convert business window back to real UTC ms
-      const dayStartUtcMs = dayStartLocal - offsetMs;
-      const dayEndUtcMs   = dayEndLocal   - offsetMs;
-
-      const sliceStart = Math.max(currentMs, dayStartUtcMs);
-      const sliceEnd   = Math.min(endMs,   dayEndUtcMs);
-
-      if (sliceEnd > sliceStart) {
-        totalMs += (sliceEnd - sliceStart);
-      }
-    }
-
-    // Jump to next local midnight on the "business" (CST) timeline
-    const nextLocalMidnight = new Date(
-      Date.UTC(
-        currentLocal.getUTCFullYear(),
-        currentLocal.getUTCMonth(),
-        currentLocal.getUTCDate() + 1,
-        0, 0, 0
-      )
-    );
-    const nextUtcMs = nextLocalMidnight.getTime() - offsetMs;
-
-    // Ensure forward progress
-    currentMs = Math.max(currentMs + 1, nextUtcMs);
-  }
-
-  return Math.round(totalMs / 60000); // minutes
-}
-
-function businessHoursBetween(startISO, endISO) {
-  return businessMinutesBetween(startISO, endISO) / 60;
-}
-
-// ---- CATEGORY REFERENCE LIST ----
-const REFERENCE_LIST = `Category: Desktop Phones
-- Phone not ringing when receiving calls
-- Unable to make outbound calls
-- Account not registered / logged out
-- Keys not responding or malfunctioning
-- Phone not powering on / random shutdowns
-- Call park not working
-- Firmware not updating or stuck update
-- Receiver not working / no audio
-- Faulty handset or LAN ports
-- LAN cable damaged / loose
-- Bluetooth headset not connecting
 Category: Cordless Phones
-- Phone not ringing when receiving calls
-- Unable to make outbound calls
-- Account not registered / logged out
-- Phone goes out of range
-- Base station offline or disconnected
-- Keys not responding or malfunctioning
-- Phone not powering on / random shutdowns
-- Call park not working
-- Firmware not updating or stuck update
-- Receiver not working / no audio
-- Faulty handset or LAN ports
-- LAN cable damaged / loose
-- Bluetooth headset not connecting
-Category: How-To / Configuration / Settings
-- Training on call flow / IVR setup
-- Training on phone features
-- Desktop app usage training
-- Mobile app usage training
-- eFax setup or training
-- How to block a caller
-- Setting up hold music
-- Uploading audio to library
-- Multi-location call transfer setup
-- Conference call setup
-- Enabling patient card
-- Enabling call pop-up feature
-- Setting up call tracking
-- E911 setup and configuration
-- Creating multiple voicemail boxes
-Category: Software
-- Notifications not working
-- Voicemail not working / setup issues
-- Softphone not working on Desktop
-- Softphone not working on Android
-- Softphone not working on iOS
-- Call park not working on app
-- Number assignment errors
-- Voicemail access errors
-- Update or change label/name
-- Wrong practice timezone configuration
-- Call flow errors
-Category: Product / Carrier Issues
-- Need isolation testing
-- Whitelisting pending/not done
-- Device-specific problems
-- Server-related issues
-- Carrier issue with Plivo
-- Carrier issue with Telnyx
-- Porting not completed / failed
-- Wrong or broken network configuration
-- Receiver failure (audio issues)
-- Unable to send or open attachments
-Category: Audio Quality – Inbound
-- Internet speed too low
-- High call latency / delay
-- Call fluctuations / instability
-- One-way audio (hear only one side)
-- Crackling/static noise
-- Whitelisting required
-- Client expectation not met
-Category: Audio Quality – Outbound
-- Internet speed too low
-- High call latency / delay
-- Call fluctuations / instability
-- One-way audio (hear only one side)
-- Crackling/static noise
-- Whitelisting required
-- Client expectation not met
-Category: Audio Quality – Both Directions
-- Internet speed too low
-- High call latency / delay
-- Call fluctuations / instability
-- One-way audio (hear only one side)
-- Crackling/static noise
-- Whitelisting required
-- Client expectation not met
-Category: Caller Name / ID
-- Receiving spam calls
-- Wrong caller name displayed
-- Caller ID mismatch
-- Need to update label name
-Category: General Enquiries
-- Request for product information
-- Asking for a new feature
-- Questions on managing users
-- Questions on managing permissions
-- Client expectation queries
-Category: Custom Fix
-- Enable/disable hold reminder tone
-- Adjust timezone settings
-- Change call waiting tone
-- Error during upgrade (timeout)
-- Setup speed dials
-- Add more call park lines
-- Provide a feature-specific workaround
-Category: Bugs & Defects
-- Mobile app crashing
-- Desktop app crashing
-- Softphone bugs
-- Firmware-related bugs
-- Notifications not working
-- Unable to answer or hang up calls
-- Hardware defect
-- Voicemail issues
-- Hold music not working
-- Audio library not working
-- Software glitches
-- Call tracking not working
-- Call flow not working
-- Call override not working
-Category: Call Drop
-- Network issues causing call drop
-- Firmware bug causing call drop
-- Whitelisting pending/not done
-Category: Installations
-- New phone installation
-- Replacement phone install
-- Partial phone installation
-- V3 migration setup
-- Bluetooth headset installation`;
+- Phone not ringing when receiving calls: Cordless device not ringing on inbound calls.
+- Unable to make outbound calls: Cordless device cannot place outbound calls.
+- Account not registered / logged out: SIP account not registered or handset logged out.
+- Phone goes out of range: Cordless phone losing connection due to range.
+- Base station offline or disconnected: Base station not reachable or not powered.
+- Keys not responding or malfunctioning: Handset keys not working.
+- Phone not powering on / random shutdowns: Cordless phone not turning on / random reboots.
+- Call park not working: Call park not functioning on cordless device.
+- Firmware not updating or stuck update: Firmware update stuck on cordless phone.
+- Receiver not working / no audio: No audio on cordless receiver.
+- Faulty handset or LAN ports: Hardware defect on base station ports.
+- LAN cable damaged / loose: LAN issues for base station.
+- Bluetooth headset not connecting: Bluetooth pairing issues on cordless system.
 
-// ---- PROMPT (includes time per user & time per role) ----
+/* ✳️ CONTINUE for ALL remaining categories, subcategories and issue summaries
+   directly from the spreadsheet, following the same pattern:
+
+Category: <Category Name>
+- <Subcategory 1>: <Issue summary text>
+- <Subcategory 2>: <Issue summary text>
+...
+*/
+`;
+
+// ------------ PROMPT (includes time per user & role + issue_summary) ------------
 const PROMPT = ({
   subject,
   status,
@@ -238,10 +108,13 @@ Classify as exactly one of:
 - No Commitment Found
 Return as: "follow_up_status": "<one>"
 
-2. CATEGORY & SUBCATEGORY (STRICT):
-Use ONLY the Category → Subcategory reference list below.
-Do not invent names; pick the closest best match from the list.
-Return: "category": "<Category>", "subcategory": "<Subcategory>"
+2. CATEGORY, SUBCATEGORY & ISSUE SUMMARY (STRICT):
+Use ONLY the Category → Subcategory → Issue Summary reference list below.
+Do not invent new names. Pick the closest best match.
+Return:
+  "category": "<Category>",
+  "subcategory": "<Subcategory>",
+  "issue_summary": "<Issue Summary text for that exact category/subcategory>"
 
 REFERENCE LIST:
 ${REFERENCE_LIST}
@@ -277,23 +150,22 @@ From the Owner Change Log, estimate which owner/team handled the ticket the most
 You DO NOT need exact hours. A brief summary like
 "Most time with VoIP Team, then briefly with Billing; finally closed by Chloe Finn"
 is enough.
-Return this as: "owner_time_summary": "<short remark>"
+Return: "owner_time_summary": "<short remark>"
 
 6. TIME SPENT PER USER (MULTILINE TEXT):
-Using the Owner Change Log, estimate time spent *per individual user/agent*.
+Using the Owner Change Log, estimate time spent per individual user/agent.
 Return a multiline string like:
 "Mannat - 3 hrs
 Shikha - 2 hrs"
 Use whole hours or half-hours (e.g. 1.5 hrs) as approximate values.
-Return this as: "time_spent_per_user": "<multiline string>"
+Return: "time_spent_per_user": "<multiline string>"
 
 7. TIME SPENT PER ROLE (MULTILINE TEXT):
-Using the Owner Change Log, estimate time spent *per role/team*.
+Using the Owner Change Log, estimate time spent per role/team.
 Return a multiline string like:
 "Escalation Manager - 1 hr
 Adit Pay - 2 hrs"
-(Use the role/team names as they appear or can be reasonably inferred.)
-Return this as: "time_spent_per_role": "<multiline string>"
+Return: "time_spent_per_role": "<multiline string>"
 
 Return a single JSON object only, with keys:
 {
@@ -301,6 +173,7 @@ Return a single JSON object only, with keys:
   "follow_up_status": "...",
   "category": "...",
   "subcategory": "...",
+  "issue_summary": "...",
   "scores": {
     "follow_up_frequency": 0,
     "no_drops": 0,
@@ -334,10 +207,10 @@ Conversation:
 ${conversation}
 
 Owner Change Log:
-${ownerChangeLog || "(none)"}  
+${ownerChangeLog || "(none)"}
 `;
 
-// ---- OpenAI caller ----
+// ------------ OpenAI caller ------------
 async function callOpenAI(prompt) {
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -369,7 +242,7 @@ async function callOpenAI(prompt) {
   return JSON.parse(data.choices[0].message.content);
 }
 
-// ---- Map AI follow-up to allowed picklist ----
+// ------------ Map AI follow-up to Zoho picklist ------------
 function normalizeFollowUpStatus(raw) {
   if (!raw) return null;
   const s = raw.toString().toLowerCase();
@@ -380,163 +253,77 @@ function normalizeFollowUpStatus(raw) {
   if (s.includes("no follow-up required") || s.includes("no commitment"))
     return "No Follow-up Required";
 
-  // fallback
   return "No Commitment Found";
 }
 
-// ---- Fetch ticket from Zoho Desk (for SLA dates) ----
-async function fetchDeskTicket(ticketId) {
-  if (!ZOHO_OAUTH_TOKEN || !ZOHO_ORG_ID) return null;
-
-  const r = await fetch(`https://desk.zoho.com/api/v1/tickets/${ticketId}`, {
-    method: "GET",
-    headers: {
-      Authorization: `Zoho-oauthtoken ${ZOHO_OAUTH_TOKEN}`,
-      orgId: ZOHO_ORG_ID,
-    },
-  });
-
-  if (!r.ok) {
-    console.warn("Failed to fetch ticket for SLA calc:", r.status);
-    return null;
-  }
-
-  const data = await r.json().catch(() => null);
-  return data || null;
-}
-
-// ---- Update Zoho Desk ticket ----
-async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
+// ------------ Update Zoho Desk ticket ------------
+async function updateDeskTicket(ticketId, aiResult) {
   if (!ZOHO_OAUTH_TOKEN || !ZOHO_ORG_ID) {
     console.warn("ZOHO_OAUTH_TOKEN or ZOHO_ORG_ID missing; skipping Desk update.");
     return { skipped: true };
   }
 
-  // Pull out AI structures, but we'll override SLA with our own rule.
-  const scores       = aiResult.scores || {};
-  const scoreReasons = aiResult.score_reasons || {};
+  const scores         = aiResult.scores || {};
+  const scoreReasons   = aiResult.score_reasons || {};
   const followUpStatus = normalizeFollowUpStatus(aiResult.follow_up_status);
 
-  const ownerTimeRemark = aiResult.owner_time_summary || ""; // -> Remarks-OC Log
-  const aiMainSummary   = aiResult.reasons || "";            // main AI paragraph
-
+  const ownerTimeRemark = aiResult.owner_time_summary || "";
+  const aiMainSummary   = aiResult.reasons || "";
   const timeSpentPerUser = aiResult.time_spent_per_user || "";
   const timeSpentPerRole = aiResult.time_spent_per_role || "";
+  const issueSummary     = aiResult.issue_summary || "";
 
-  // ---- SLA ADHERENCE BASED ON BUSINESS HOURS RULE ----
-  let slaScore  = scores.sla_adherence ?? null;
-  let slaReason = scoreReasons.sla_adherence || "";
-
-  try {
-    const ticket = await fetchDeskTicket(ticketId);
-    if (ticket) {
-      const createdTime =
-        ticket.createdTime ||
-        (ticket.customFields && ticket.customFields["Created Time1"]) ||
-        null;
-
-      const cf          = ticket.cf || {};
-      const custom      = ticket.customFields || {};
-
-      const firstResponseTime =
-        cf.cf_first_response_time ||
-        custom["First Response Time"] ||
-        null;
-
-      const closedTime =
-        ticket.closedTime ||
-        cf.cf_closed_time ||
-        custom["Closed Time"] ||
-        null;
-
-      if (createdTime && firstResponseTime && closedTime) {
-        const frMinutes = businessMinutesBetween(createdTime, firstResponseTime);
-        const resHours  = businessHoursBetween(createdTime, closedTime);
-
-        const firstWithin30 = frMinutes <= 30;
-        const resWithin4    = resHours  <= 4;
-
-        const withinSLA = firstWithin30 && resWithin4;
-
-        // Binary scoring rule: full score if both under SLA, else low score
-        slaScore = withinSLA ? 10 : 3;
-
-        const frPretty  = Math.round(frMinutes);
-        const resPretty = resHours.toFixed(1);
-
-        if (withinSLA) {
-          slaReason =
-            `First response in about ${frPretty} business minutes and ` +
-            `resolution in about ${resPretty} business hours; both within SLA ` +
-            `(30 minutes for first response, 4 hours for resolution).`;
-        } else {
-          slaReason =
-            `SLA breached: first response took about ${frPretty} business minutes ` +
-            `and resolution about ${resPretty} business hours, exceeding the ` +
-            `30-minute / 4-hour SLA targets.`;
-        }
-
-        // Override AI values so mappings below pick up these numbers
-        scores.sla_adherence          = slaScore;
-        scoreReasons.sla_adherence    = slaReason;
-      }
-    }
-  } catch (e) {
-    console.error("Error computing SLA adherence:", e);
-  }
-
-  // Brief AI Summary uses the generic explanation only
   const briefSummary = aiMainSummary;
 
-  // ---- CUSTOM FIELDS BY LABEL ----
+  // ---- custom fields by LABEL (Zoho Desk UI labels) ----
   const customFields = {
-    // MAIN AI LABELS
     "Follow-up Status": followUpStatus,
     "AI Category": aiResult.category || "",
     "AI Sub Category": aiResult.subcategory || "",
     "AI Final Score": aiResult.final_score ?? null,
-    "AI Category explanation": briefSummary,
+    "AI Category explanation": briefSummary, // "Brief AI Summary"
 
-    // NUMERIC SCORES
     "Follow-Up Frequency": scores.follow_up_frequency ?? null,
-    "No Drops Score":      scores.no_drops            ?? null,
-    "SLA Adherence":       scores.sla_adherence       ?? null,
-    "Resolution Quality":  scores.resolution_quality  ?? null,
-    "Customer Sentiment":  scores.customer_sentiment  ?? null,
-    "Agent Tone":          scores.agent_tone          ?? null,
+    "No Drops Score":       scores.no_drops ?? null,
+    "SLA Adherence":        scores.sla_adherence ?? null,
+    "Resolution Quality":   scores.resolution_quality ?? null,
+    "Customer Sentiment":   scores.customer_sentiment ?? null,
+    "Agent Tone":           scores.agent_tone ?? null,
 
-    // PER-SCORE REASONS
-    "Reason Follow-Up Frequency": scoreReasons.follow_up_frequency || "",
-    "Reason No Drops":            scoreReasons.no_drops            || "",
-    "Reasons SLA Adherence":      scoreReasons.sla_adherence       || "",
-    "Reason Resolution Quality":  scoreReasons.resolution_quality  || "",
-    "Reason Customer Sentiment":  scoreReasons.customer_sentiment  || "",
-    "Reason Agent Tone":          scoreReasons.agent_tone          || "",
+    "Reason Follow-Up Frequency":  scoreReasons.follow_up_frequency || "",
+    "Reason No Drops":             scoreReasons.no_drops || "",
+    "Reasons SLA Adherence":       scoreReasons.sla_adherence || "",
+    "Reason Resolution Quality":   scoreReasons.resolution_quality || "",
+    "Reason Customer Sentiment":   scoreReasons.customer_sentiment || "",
+    "Reason Agent Tone":           scoreReasons.agent_tone || "",
 
-    // Owner time remark
     "Remarks-OC Log": ownerTimeRemark,
 
-    // Human-readable multiline fields (labels)
+    // NEW labels in Desk (create as Multi-line fields)
     "Time Spent Per User": timeSpentPerUser,
     "Time Spent Per Role": timeSpentPerRole,
+    "Issue Summary":       issueSummary,
   };
 
-  // ---- API-NAME FIELDS ----
+  // ---- custom fields by API NAME ----
   const body = {
     customFields,
     cf: {
-      // Brief AI Summary – API name
+      // Brief AI Summary
       cf_ai_category_explanation: briefSummary,
 
-      // Remarks-OC Log – API name
+      // Remarks-OC Log
       cf_remarks_oc_log: ownerTimeRemark,
 
-      // Legacy / existing mapping if used elsewhere
+      // If you still use this older field for remarks:
       cf_ts_resolution: ownerTimeRemark,
 
-      // Multiline breakdowns – make sure these match your Desk API names
-      cf_csm_resolution:  timeSpentPerUser,
+      // Time spent fields (adjust to your real API names)
+      cf_csm_resolution: timeSpentPerUser,
       cf_voip_resolution: timeSpentPerRole,
+
+      // Issue summary field (set its API name here)
+      cf_tech_csm_resolution: issueSummary,
     },
   };
 
@@ -558,12 +345,12 @@ async function updateDeskTicket(ticketId, aiResult, ownerChangeLog) {
   return { status: r.status, data };
 }
 
-// ---- Health check ----
+// ------------ Health check ------------
 app.get("/", (_req, res) => {
   res.send("✅ Railway app is live!");
 });
 
-// ---- Webhook ----
+// ------------ Webhook ------------
 app.post("/desk-webhook", async (req, res) => {
   try {
     const secret = req.headers["desk-shared-secret"];
@@ -602,7 +389,7 @@ app.post("/desk-webhook", async (req, res) => {
 
     let deskResult = { skipped: true };
     if (ticket_id) {
-      deskResult = await updateDeskTicket(ticket_id, ai, owner_change_log);
+      deskResult = await updateDeskTicket(ticket_id, ai);
     } else {
       console.warn("No ticket_id in payload; skipping Desk update.");
     }
@@ -616,7 +403,7 @@ app.post("/desk-webhook", async (req, res) => {
   }
 });
 
-// ---- Start server ----
+// ------------ Start server ------------
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log("Server running on port", PORT);
