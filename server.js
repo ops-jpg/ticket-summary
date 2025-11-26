@@ -261,6 +261,176 @@ Installations	Partial phone installation	Incomplete setup requiring follow-up.
 Installations	V3 migration setup	Migration setup from old to V3 platform.
 Installations	Bluetooth headset installation	Assistance with pairing Bluetooth headset devices.
 
+Category: Training
+Training	Call Flow Training	Guidance on creating and managing call routing and IVR menu options.
+Training	Phone feature training	Assistance with understanding and using phone functionalities effectively.
+Training	Desktop app training	Instructions on navigating and using features within the desktop application.
+Training	Mobile app training	Training on accessing and managing calls through the mobile application.
+Training	Call override training	Training on configuring and using call override settings.
+Training	eFax training	Help with configuring and sending/receiving faxes through the eFax feature.
+Training	Block caller	Steps to block unwanted numbers from reaching the phone system.
+Training	Hold music	Guidance on uploading and assigning music or messages for callers on hold.
+Training	Audio library	Instructions for adding greeting or IVR recordings to the audio library.
+Training	Multilocation call transfer	Configuration to enable transferring calls between multiple office locations.
+Training	Conference call setup	Training on creating and managing multi-party conference calls.
+Training	Enable patient card	Steps to activate the patient card feature for displaying caller details.
+Training	Enable call pop up	Instructions to enable on-screen pop-ups for incoming calls.
+Training	Call tracking	Help with configuring call tracking to monitor and analyze call performance.
+Training	E911 Setup	Guidance on registering and setting up emergency service (E911) details.
+Training	Multiple Voicemail Box	Instructions for creating and managing separate voicemail boxes per user or department.
+
+Category: Software
+Software	Notifications	Desktop or mobile notifications not triggering for incoming calls or messages.
+Software	VM troubleshooting	Users unable to access or configure voicemail settings correctly.
+Software	Softphone troubleshooting - Desktop	Desktop app softphone fails to connect or make calls.
+Software	Softphone troubleshooting - Android	Android softphone app fails to register or handle calls.
+Software	Softphone troubleshooting - iOS	iOS softphone app not registering or crashing during use.
+Software	Call park troubleshooting	Call park functionality unavailable or broken in mobile/desktop app.
+Software	Number assignment error	Wrong or missing number assignment in the system or app.
+Software	Voicemail error	Errors while retrieving or accessing voicemail through app or portal.
+Software	Label name change	Request to modify displayed name or label on app or device.
+Software	Practice timezone configuration	Practice time zone configured incorrectly in portal settings.
+Software	Call flow error	Configured call routing not functioning as expected.
+
+Category: Product/Carrier issues
+Product/Carrier issues - L2	Isolation	Require test calls or environment setup to isolate issue cause.
+Product/Carrier issues - L2	Whitelisting	IP or port whitelisting not completed, affecting connectivity.
+Product/Carrier issues - L2	Device specific	Issue isolated to a specific model or firmware version.
+Product/Carrier issues - L2	Server	Problem originating from server-side configuration or outage.
+Product/Carrier issues - L2	Plivo	Carrier-side problem affecting call routing or delivery via Plivo.
+Product/Carrier issues - L2	Telnyx	Telnyx carrier routing or call completion issue.
+Product/Carrier issues - L2	Porting related	Number port not yet completed or has failed validation.
+Product/Carrier issues - L2	Network configuration	Incorrect VLAN, DNS, or IP settings causing service disruption.
+Product/Carrier issues - L2	Receiver failure	Audio output failure due to hardware or network degradation.
+Product/Carrier issues - L2	Attachment issue	Attachments fail to upload or download in ticket/email communication.
+
+Category: Audio quality inbound
+Audio quality inbound	WL requirement	Two-way audio instability until IP/ports are whitelisted.
+Audio quality inbound	Internet speed	Low bandwidth on client side causing degraded inbound audio.
+Audio quality inbound	Latency	Delay in receiving audio from caller side due to network lag.
+Audio quality inbound	Fluctuation	Inconsistent inbound audio caused by packet loss or jitter.
+Audio quality inbound	Client expectation	Client perceives audio performance below acceptable quality.
+Audio quality inbound	One-way audio	Caller can hear but not be heard (or vice versa).
+Audio quality inbound	Crackly noise / static	Distorted inbound audio due to line interference or jitter.
+
+Category: Audio quality outbound
+Audio quality outbound	WL requirement	Audio failure resolved by completing IP/port whitelisting.
+Audio quality outbound	Internet speed	Low upload bandwidth causing distorted outbound audio.
+Audio quality outbound	Latency	Outgoing voice delayed due to high latency or routing path.
+Audio quality outbound	Fluctuation	Outbound audio breaking up or cutting off intermittently.
+Audio quality outbound	Client expectation	Outbound audio clarity not matching client expectations.
+Audio quality outbound	One-way audio	Client cannot hear recipient; outbound RTP blocked.
+Audio quality outbound	Crackly noise / static	Outgoing audio distorted by jitter or device interference.
+
+Category:Audio quality both
+Audio quality both	WL requirement	Whitelisting pending for stable audio path.
+Audio quality both	Internet speed	Bandwidth issues affecting both inbound and outbound streams.
+Audio quality both	Latency	Audio lag present on both ends due to route delay.
+Audio quality both	Fluctuation	Audio breaks or drops intermittently in both directions.
+Audio quality both	Client expectation	Audio quality below client’s expected standard in both directions.
+Audio quality both	One-way audio	One-way audio persisting in both inbound/outbound tests.
+Audio quality both	Crackly noise / static	Audio distorted or staticky across both channels.
+
+Category:Caller Name / ID
+Caller Name / ID	Spam calls	Frequent spam or robocalls received by the client.
+Caller Name / ID	Caller name inaccuracies	Caller name shown incorrectly on inbound calls.
+Caller Name / ID	Caller ID mismatch	Displayed caller ID differs from configured number.
+Caller Name / ID	Update label name	Request to modify or correct caller ID label name.
+
+Category:General Enquiries
+General Enquiries	Product information	Client requesting details on existing product or feature.
+General Enquiries	Feature request	Client suggesting or requesting new product functionality.
+General Enquiries	Client expectation	Client concerns or expectations needing clarification.
+General Enquiries	Managing users	Creating, modifying, and controlling user accounts, extensions, and access to system features.
+General Enquiries	Manage permissions	Controlling user or device access rights to features, settings, and administrative functions.
+
+Category:Custom Fix
+Custom Fix	Hold reminder tone	An audible alert played to a user on hold, reminding them or the agent that the call is still active.
+Custom Fix	Time zone settings	Configuring the phone system or device to the correct local time, ensuring accurate call logs, schedules, and timestamps.
+Custom Fix	Call waiting tone	An audible alert that notifies a user already on a call that another incoming call is waiting.
+Custom Fix	Time-out error while upgrading	When the device or system fails to complete the firmware or software update within the expected time.
+Custom Fix	Speed dials	Pre-configured shortcuts that let users call frequently dialed numbers.
+Custom Fix	Additional park lines	Extra lines configured on a phone system to allow multiple calls to be parked.
+Custom Fix	Feature-specific workaround	Workaround for a specific feature.
+
+Category:Bugs & Defects
+Bugs & Defects	Mobile app crashes	Incidents where an application unexpectedly closes or stops functioning on a smartphone.
+Bugs & Defects	Desktop app crashes	Incidents where a software application unexpectedly stops working on a computer.
+Bugs & Defects	Softphone	Problems with the softphone application used to make and receive calls over the internet.
+Bugs & Defects	Firmware bugs	Errors or glitches in the built-in device firmware.
+Bugs & Defects	Notifications	Alerts or messages that fail to inform users about events or updates, such as incoming calls or voicemails.
+Bugs & Defects	Unable to answer	Issue where incoming calls cannot be picked up or connected.
+Bugs & Defects	Unable to hang up	Problem where a call does not disconnect properly after attempting to end it.
+Bugs & Defects	Outage	Complete or partial loss of VoIP service due to network, server, or provider failures.
+Bugs & Defects	Hardware	Problems with physical VoIP devices such as phones, headsets, or adapters.
+Bugs & Defects	Voicemail issues	Issues with recording, delivering, accessing, or playing voicemail messages.
+Bugs & Defects	Hold music issues	Callers experience no music, poor audio quality, wrong tracks, or silence while on hold.
+Bugs & Defects	Audio library issues	Errors that occur when managing, accessing, or using audio files within the audio library.
+Bugs & Defects	Software	Glitches in VoIP applications that cause call failures, poor audio quality, or connectivity issues.
+Bugs & Defects	Call tracking issues	Issues related to the call tracking module or its data.
+Bugs & Defects	Call flow issues	Problems in the sequence or routing of calls within a telephony system.
+Bugs & Defects	Call override issues	Problems where a call fails to take priority or interrupt another call as intended.
+Bugs & Defects	Inbound call (iOS)	Issues with inbound calls on iOS devices.
+Bugs & Defects	CNAM (outbound)	Issues where the caller name displayed to recipients during outgoing calls is incorrect.
+Bugs & Defects	CNAM (inbound)	Issues where the caller name (CNAM) for incoming calls is incorrectly displayed.
+
+Category:Call Drop
+Call Drop	WL requirement	Conditions that must be met to whitelist numbers, devices, or networks to prevent or reduce call drops.
+Call Drop	Network	Calls dropping due to network issues.
+Call Drop	Firmware bugs	Calls dropping due to bugs identified in firmware.
+
+Category:Install
+Install	New phone install	Process of setting up a new phone device by connecting it to the network, configuring it, and making it ready for use.
+Install	Partial phone install	When a phone is set up with only basic connectivity or limited configuration.
+Install	V3 migration	Upgrading or moving systems, devices, or data from an older version to version 3.
+Install	Bluetooth headset install	Installing and connecting Bluetooth headsets to the phones.
+
+Category:Desktop Phones
+Desktop Phones	Phone not ringing when receiving calls	The phone doesn’t alert or ring when an incoming call is received, causing missed calls.
+Desktop Phones	Unable to make outbound calls	Users are unable to place outgoing calls due to configuration, registration, or network issues.
+Desktop Phones	Account not registered / logged out	The phone loses SIP registration with the server, preventing call functionality.
+Desktop Phones	Keys not responding or malfunctioning	Physical buttons on the device are unresponsive or trigger incorrect actions.
+Desktop Phones	Phone not powering on / random shutdowns	The phone fails to turn on or powers off unexpectedly due to hardware or power issues.
+Desktop Phones	Call park not working	The call park feature doesn’t function properly, preventing users from placing calls on hold for pickup.
+Desktop Phones	Firmware not updating or stuck update	Firmware upgrade fails or freezes, leaving the device in an unstable state.
+Desktop Phones	Receiver not working / no audio	Users can’t hear audio or the handset/speaker produces no sound during calls.
+Desktop Phones	Faulty handset or LAN ports	Hardware ports or the handset are damaged or malfunctioning, affecting connectivity.
+Desktop Phones	LAN cable damaged / loose	Improper or damaged network cable connection causes phone disconnection or instability.
+Desktop Phones	Bluetooth headset not connecting	The phone fails to pair or maintain connection with Bluetooth headsets.
+
+Category:Cordless Phones
+Cordless Phones	Phone not ringing when receiving calls	Cordless phone doesn’t ring or alert users on incoming calls due to registration or range issues.
+Cordless Phones	Unable to make outbound calls	Users can’t make outgoing calls due to configuration or registration failure.
+Cordless Phones	Account not registered / logged out	The handset loses SIP registration, disabling calling features.
+Cordless Phones	Phone goes out of range	Cordless phone loses base connection when moved too far from its station.
+Cordless Phones	Base station offline or disconnected	Base station disconnected from power or internet, affecting call connectivity.
+Cordless Phones	Keys not responding or malfunctioning	Handset buttons not responding or triggering incorrect functions.
+Cordless Phones	Phone not powering on / random shutdowns	Device fails to start or shuts down unexpectedly due to power or battery fault.
+Cordless Phones	Call park not working	Call park feature not functioning correctly between cordless devices.
+Cordless Phones	Firmware not updating or stuck update	Firmware upgrade process fails or hangs mid-way.
+Cordless Phones	Receiver not working / no audio	No sound output from handset or base during calls.
+Cordless Phones	Faulty handset or LAN ports	Faulty hardware or damaged ports affecting phone operation.
+Cordless Phones	LAN cable damaged / loose	Poor network connection due to cable issue or improper connection.
+Cordless Phones	Bluetooth headset not connecting	Cordless handset unable to connect or pair with Bluetooth headsets.
+
+Category:How-To / Configuration / Settings
+How-To / Configuration / Settings	Training on call flow / IVR setup	Guidance on creating and managing call routing and IVR menu options.
+How-To / Configuration / Settings	Training on phone features	Assistance with understanding and using phone functionalities effectively.
+How-To / Configuration / Settings	Desktop app usage training	Instructions on navigating and using features within the desktop application.
+How-To / Configuration / Settings	Mobile app usage training	Training on accessing and managing calls through the mobile application.
+How-To / Configuration / Settings	eFax setup or training	Help with configuring and sending/receiving faxes through the eFax feature.
+How-To / Configuration / Settings	How to block a caller	Steps to block unwanted numbers from reaching the phone system.
+How-To / Configuration / Settings	Setting up hold music	Guidance on uploading and assigning music or messages for callers on hold.
+How-To / Configuration / Settings	Uploading audio to library	Instructions for adding greeting or IVR recordings to the audio library.
+How-To / Configuration / Settings	Multi-location call transfer setup	Configuration to enable transferring calls between multiple office locations.
+How-To / Configuration / Settings	Conference call setup	Training on creating and managing multi-party conference calls.
+How-To / Configuration / Settings	Enabling patient card	Steps to activate the patient card feature for displaying caller details.
+How-To / Configuration / Settings	Enabling call pop-up feature	Instructions to enable on-screen pop-ups for incoming calls.
+How-To / Configuration / Settings	Setting up call tracking	Help with configuring call tracking to monitor and analyze call performance.
+How-To / Configuration / Settings	E911 setup and configuration	Guidance on registering and setting up emergency service (E911) details.
+How-To / Configuration / Settings	Creating multiple voicemail boxes	Instructions for creating and managing separate voicemail boxes per user or department.
+
+
 
 
 Category: Mass Texting
