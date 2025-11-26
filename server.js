@@ -159,6 +159,109 @@ Category: Cordless Phones
 - LAN cable damaged / loose: LAN issues for base station.
 - Bluetooth headset not connecting: Bluetooth pairing issues on cordless system.
 
+Category: Software
+Software	Notifications not working	Desktop or mobile notifications not triggering for incoming calls or messages.
+Software	Voicemail not working / setup issues	Users unable to access or configure voicemail settings correctly.
+Software	Softphone not working on Desktop	Desktop app softphone fails to connect or make calls.
+Software	Softphone not working on Android	Android softphone app fails to register or handle calls.
+Software	Softphone not working on iOS	iOS softphone app not registering or crashing during use.
+Software	Call park not working on app	Call park functionality unavailable or broken in mobile/desktop app.
+Software	Number assignment errors	Wrong or missing number assignment in the system or app.
+Software	Voicemail access errors	Errors while retrieving or accessing voicemail through app or portal.
+Software	Update or change label/name	Request to modify displayed name or label on app or device.
+Software	Wrong practice timezone configuration	Practice time zone configured incorrectly in portal settings.
+Software	Call flow errors	Incorrect or broken routing causing call flow failures.
+
+Category: Product / Carrier Issues
+Product / Carrier Issues	Need isolation testing	Require test calls or environment setup to isolate issue cause.
+Product / Carrier Issues	Whitelisting pending/not done	IP or port whitelisting not completed, affecting connectivity.
+Product / Carrier Issues	Device-specific problems	Issue isolated to a specific model or firmware version.
+Product / Carrier Issues	Server-related issues	Problem originating from server-side configuration or outage.
+Product / Carrier Issues	Carrier issue with Plivo	Carrier-side problem affecting call routing or delivery.
+Product / Carrier Issues	Carrier issue with Telnyx	Telnyx carrier routing or call completion issue.
+Product / Carrier Issues	Porting not completed / failed	Number port not yet completed or has failed validation.
+Product / Carrier Issues	Wrong or broken network configuration	Incorrect VLAN, DNS, or IP settings causing service disruption.
+Product / Carrier Issues	Receiver failure (audio issues)	Audio output failure due to hardware or network degradation.
+Product / Carrier Issues	Unable to send or open attachments	Attachments fail to upload or download in ticket/email communication.
+
+Category: Audio Quality – Inbound
+Audio Quality – Inbound	Internet speed too low	Low bandwidth on client side causing degraded inbound audio.
+Audio Quality – Inbound	High call latency / delay	Delay in receiving audio from caller side due to network lag.
+Audio Quality – Inbound	Call fluctuations / instability	Inconsistent inbound audio caused by packet loss or jitter.
+Audio Quality – Inbound	One-way audio (hear only one side)	Caller can hear but not be heard (or vice versa).
+Audio Quality – Inbound	Crackling/static noise	Distorted inbound audio due to line interference or jitter.
+Audio Quality – Inbound	Whitelisting required	Audio failure resolved by completing IP/port whitelisting.
+Audio Quality – Inbound	Client expectation not met	Client perceives audio performance below acceptable quality.
+
+Category: Audio Quality – Outbound
+Audio Quality – Outbound	Internet speed too low	Low upload bandwidth causing distorted outbound audio.
+Audio Quality – Outbound	High call latency / delay	Outgoing voice delayed due to high latency or routing path.
+Audio Quality – Outbound	Call fluctuations / instability	Outbound audio breaking up or cutting off intermittently.
+Audio Quality – Outbound	One-way audio (hear only one side)	Client cannot hear recipient; outbound RTP blocked.
+Audio Quality – Outbound	Crackling/static noise	Outgoing audio distorted by jitter or device interference.
+Audio Quality – Outbound	Whitelisting required	Whitelisting pending for stable outbound audio path.
+Audio Quality – Outbound	Client expectation not met	Outbound audio clarity not matching client expectations.
+
+Category: Audio Quality – Both Directions
+Audio Quality – Both Directions	Internet speed too low	Bandwidth issues affecting both inbound and outbound streams.
+Audio Quality – Both Directions	High call latency / delay	Audio lag present on both ends due to route delay.
+Audio Quality – Both Directions	Call fluctuations / instability	Audio breaks or drops intermittently in both directions.
+Audio Quality – Both Directions	One-way audio (hear only one side)	One-way audio persisting in both inbound/outbound tests.
+Audio Quality – Both Directions	Crackling/static noise	Audio distorted or staticky across both channels.
+Audio Quality – Both Directions	Whitelisting required	Two-way audio instability until IP/ports are whitelisted.
+Audio Quality – Both Directions	Client expectation not met	Audio quality below client’s expected standard in both directions.
+
+Category: Caller Name / ID
+Caller Name / ID	Receiving spam calls	Frequent spam or robocalls received by the client.
+Caller Name / ID	Wrong caller name displayed	Caller name shown incorrectly on inbound calls.
+Caller Name / ID	Caller ID mismatch	Displayed caller ID differs from configured number.
+Caller Name / ID	Need to update label name	Request to modify or correct caller ID label name.
+
+Category: General Enquiries
+General Enquiries	Request for product information	Client requesting details on existing product or feature.
+General Enquiries	Asking for a new feature	Client suggesting or requesting new product functionality.
+General Enquiries	Questions on managing users	Queries related to adding, removing, or modifying users.
+General Enquiries	Questions on managing permissions	Clarification on access control or permission setup.
+General Enquiries	Client expectation queries	Client concerns or expectations needing clarification.
+
+Category: Custom Fix
+Custom Fix	Enable/disable hold reminder tone	Request to enable or disable periodic hold tone reminders.
+Custom Fix	Adjust timezone settings	Request to correct or modify practice time zone.
+Custom Fix	Change call waiting tone	Customize or adjust call waiting alert tone.
+Custom Fix	Error during upgrade (timeout)	System timeout error encountered during upgrade.
+Custom Fix	Setup speed dials	Assistance with configuring speed dial buttons.
+Custom Fix	Add more call park lines	Request to expand call park capacity.
+Custom Fix	Provide a feature-specific workaround	Custom configuration to temporarily bypass an issue.
+
+Category: Bugs & Defects
+Bugs & Defects	Mobile app crashing	Mobile application closes unexpectedly during use.
+Bugs & Defects	Desktop app crashing	Desktop app crashes or freezes during operation.
+Bugs & Defects	Softphone bugs	Unexpected behavior or errors within the softphone feature.
+Bugs & Defects	Firmware-related bugs	Device malfunctions due to firmware-related issues.
+Bugs & Defects	Notifications not working	Notification system fails to alert users on calls or messages.
+Bugs & Defects	Unable to answer or hang up calls	Call controls unresponsive on device or app.
+Bugs & Defects	Hardware defect	Physical defect or malfunction in device hardware.
+Bugs & Defects	Voicemail issues	Errors accessing, saving, or retrieving voicemail messages.
+Bugs & Defects	Hold music not working	Hold music not playing for callers placed on hold.
+Bugs & Defects	Audio library not working	Audio files in library fail to load or play.
+Bugs & Defects	Software glitches	Minor UI or performance bugs affecting usability.
+Bugs & Defects	Call tracking not working	System not logging or tracking calls correctly.
+Bugs & Defects	Call flow not working	Configured call routing not functioning as expected.
+Bugs & Defects	Call override not working	Override settings fail to take effect.
+
+Category: Call Drop
+Call Drop	Network issues causing call drop	Calls disconnect mid-way due to network interruptions.
+Call Drop	Firmware bug causing call drop	Call termination triggered by firmware-level defect.
+Call Drop	Whitelisting pending/not done	Call drops due to missing network whitelisting.
+
+Category: Installations
+Installations	New phone installation	Installation and setup of new phones at client site.
+Installations	Replacement phone install	Replacement device installation for defective unit.
+Installations	Partial phone installation	Incomplete setup requiring follow-up.
+Installations	V3 migration setup	Migration setup from old to V3 platform.
+Installations	Bluetooth headset installation	Assistance with pairing Bluetooth headset devices.
+
+
 
 Category: Mass Texting
 - Not able to stop mass text: Unable to stop a mass text once it has been initiated.
