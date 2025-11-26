@@ -159,6 +159,83 @@ Category: Cordless Phones
 - LAN cable damaged / loose: LAN issues for base station.
 - Bluetooth headset not connecting: Bluetooth pairing issues on cordless system.
 
+
+Category: Mass Texting
+- Not able to stop mass text: Unable to stop a mass text once it has been initiated.
+- Not able to select segment in mass text: Unable to add or select a segment while creating a mass text.
+
+Category: ASAP
+- Wrong patient appear in ASAP: Incorrect patients appearing due to manual selection errors.
+- No patient in ASAP list: Patients not appearing; need to manually select from list.
+
+Category: Internal Chat
+- Messages not received: Internal messages not being received in Adit.
+- Not able to delete chat: Unable to delete messages in internal chat.
+- Message delay: Messages delayed or failing to send through internal chat.
+
+Category: Others
+- Notification Missing: Notifications not appearing on Adit dashboard.
+- Notification read issue: Unable to open or read received notifications.
+- Notification not redirecting: Notifications not redirecting to the correct page.
+- Dual notification issue: Duplicate notifications appearing for the same message.
+- App Lag Issue: Desktop app lag due to outdated version.
+- Server disconnection: Frequent disconnection when server computer is off.
+- EHR Sync break: Server app disconnected from EHR due to shutdown or crash.
+- Frequent Disconnect: Internet or system frequently disconnecting.
+- Adit app slow in web: Browser requires clearing cookies/cache.
+- Adit app slow in desktop app: Desktop app slow due to outdated version.
+- Status mapping issue: Appointment status not mapped correctly for reminders.
+- Wrong business hours: Business hours incorrectly configured in Location > General.
+
+Category: Server App
+- EHR/PMS Disconnected Error on Adit app: EHR/PMS disconnected from Adit.
+- Patient forms are not syncing: Sync failure due to server application issues.
+- Reminders not going out: Server app failure preventing reminders from being sent.
+- Payments not syncing: Adit Pay payments not syncing because of server app issue.
+- EHR disconnected: Practice EHR completely disconnected.
+- Practice Analytics not syncing: PA failing due to server disconnection.
+- Server app resync: Server app requires syncing.
+- Server app reinstall: Practice server application needs reinstallation.
+- Server app install: Practice server installation required.
+- EHR change: EHR/PMS needs to be changed for the practice.
+- EHR disconnection frequently: PMS/EHR disconnecting repeatedly.
+- Server system changed: System or configuration changes causing issues.
+- High CPU usage: High CPU usage on server machine.
+- EHR Crashing: EHR software crashing or unresponsive.
+- Server Crashing: Server crashing or not functioning.
+- EHR upgrade: Practice EHR upgrade required.
+- Server App upgrade: Server app upgrade needed.
+- Cloud EHR install: Cloud EHR installation required on server.
+- Chrome Extension not working: Adit Chrome extension needs reconnection.
+- Chrome Extension installation: Install the Adit browser extension for Chrome.
+
+Category: Adit Pay
+- Ledger Posting: Payments not posting to the EHR ledger.
+- Payment Issue: Payments not syncing correctly in Adit Pay.
+- Terminal Issues: Card terminal malfunctioning.
+- Hardware Replacement/Return: Hardware return or replacement required.
+- Demo/Basic Inquiry: Need information about Adit Pay or demo scheduled.
+- Walkthrough Training: Training needed for Adit Pay module.
+- Sign Up/Set Up: Adit Pay setup and onboarding.
+- Terminal Registration: Card terminal registration required.
+- Price Comparison: Comparing Adit Pay cost with competitors.
+- Feature Request: Requested new Adit Pay feature.
+- Bugs/Outage: Bugs or outages affecting Adit Pay functionality.
+- Configuration/Settings: Configuration issue with Adit Pay module.
+- Basic Troubleshooting: Basic troubleshooting for Adit Pay errors.
+- EHR Disconnection: Adit Pay disconnected from EHR via server app.
+
+Category: Practice Analytics
+- Sync: Practice Analytics data not syncing or loading.
+- Data issues: Incorrect or inaccurate PA reporting data.
+- Preferences: Settings for Monthly Goals, Follow-ups, Team preferences.
+- Training: Training for PA module through built-in module scheduling.
+- Upgrade to Analytics: Practice needs upgrade to Analytics bundle.
+- Feature Requests: New requested features for the PA module.
+- Patient list Requests: Need help fetching specific patient lists.
+- Export: Issues exporting reports from PA.
+- Daily, Weekly, Monthly Reports: Filtering or viewing reports not working correctly.
+
 Category: Chat Issue
 - Chats not working: Live chat widget not opening or not visible.
 - Chats Deleted: Chats getting deleted automatically.
