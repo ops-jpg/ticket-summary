@@ -565,7 +565,7 @@ Category: Analytics Issue
 Category: Appointment Issue
 - Unable to book appointment: Appointment booking fails or throws an error.
 - Appointment not syncing: Appointment not showing in Adit or EHR.
-
+;
 
 // ------------ PROMPT (includes time per user & role + issue_summary) ------------
 const PROMPT = ({
