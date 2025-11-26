@@ -24,18 +24,99 @@ const ZOHO_OAUTH_TOKEN   = process.env.ZOHO_OAUTH_TOKEN;
 // until ALL rows from the sheet are covered.
 
 const REFERENCE_LIST = `
+
 Category: OS Issue
-- Mapping: Appointment mapping not synced correctly with EHR.
-- Configuration: Configuration mismatch between ADIT and EHR.
-- Appointment Write problem into EHR: Appointment write-back to EHR is failing.
-- Wrong Appointment Time: Appointments show wrong time between ADIT and EHR.
-- Slot Missing: Appointment slots missing compared to EHR.
-- Slot Available on Block / Holiday: Blocked/holiday slots still appear available.
-- Provider Hours missing: Provider hours not created on schedule.
-- Operatory Hours Missing: Operatory open hours not matching EHR schedule.
-- Business hours Missing: Business hours mismatch between EHR and ADIT.
-- Incorrect Slots appear: Slots not blocked correctly on EHR.
-- Forms configuration issue: Webforms not configured properly for online scheduling.
+- Mapping: Online scheduling not mapped correctly between provider, operatory, and services with EHR.
+- Configuration: Online scheduling configuration requires setup.
+- Appointment Write problem into EHR: Appointment write-back toggle turned off.
+- Wrong Appointment Time: Incorrect schedule time mapped when booking appointments.
+- Slot Missing: Appointment and schedule slots mismatch with EHR.
+- Slot Available on Block / Holiday: Blocked or holiday slots appearing as available.
+- Provider Hours Missing: Provider hours missing on schedule.
+- Operatory Hours Missing: Operatory open hours missing or incorrect.
+- Business Hours Missing: Business hours mismatch between EHR and Adit.
+- Incorrect Slots Appear: Slots not blocked correctly per EHR data.
+- Forms Configuration Issue: Webforms not configured correctly for online scheduling via microsite link.
+
+Category: Engage Issue
+- Appointment Reminder Isn't Received: Patients not receiving appointment reminders.
+- Appointment Reminder Setup Issue: Appointment reminders not configured correctly.
+- Appointment Reminder With Incorrect Time: Reminder time incorrect due to server/app disconnect or reschedule.
+- Appointment Reminder Delay: Reminders delayed beyond configured schedule.
+- SC Isn't Received: Schedule confirmation toggle off or advanced filters applied.
+- SC Issue for New & Existing Patient: SC flow not configured correctly for different patient types.
+- SC Issue With Patient Forms: Patient forms not added to SC workflow.
+- AR Cron Issue: Appointment reminder CRON service malfunction.
+- SC Cron Issue: Schedule confirmation CRON malfunction.
+- BR Sent to Inactive Patients: Birthday reminders sent to inactive patients.
+- BR Sent to Wrong Patient: Incorrect patient receiving birthday reminders.
+- BR Not Sent: Birthday reminders not triggering.
+- Recall Reminder Not Sent: Recall reminders failing based on recall type or setup.
+- Recall Reminder to Inactive Patient: Recall sent to inactive patient.
+- Recall Sent to Wrong Patient: Incorrect patient mapping.
+- Recall Not Sent Despite Appointment: Appointment exists but recall not sent.
+- Recall Types Issue: Recall types missing or toggles off.
+- Recall Due Date Issue: Incorrect due date selected.
+- Payment Reminder Issue: Payment reminders not sending.
+- Missed Call Text Issue: Missed-call text not sent due to setup or missing business hours.
+- Auto Confirmation Issue: Auto-confirmation not updating correctly.
+- Appointment Write Issue: Appointment not added to schedule from Adit OS.
+- Multiple Appointment Confirmed Issue: Multiple confirmations not updating properly.
+- Auto Confirm Thank You Issue: Incorrect auto-reply message sent.
+- Status Mapping Issue: Appointment status mapping incorrect.
+- Auto Confirmation Mapping Issue: EHR not confirming after Adit confirmation.
+- Auto Confirmation Reply Issue: Auto-confirmation replies not sent.
+- Chat Thread Not Updated: Chat thread not syncing between Adit and EHR.
+- Wrong Chat Populate: Incorrect chat mapping or delayed sync.
+- Chat Thread Missing: Messages missing or not showing.
+
+Category: Patient Form Issue
+- Patient Form Not Sending: Incorrect patient email/phone.
+- Patient Form Not Received: Form not received in Adit or EHR.
+- Form Details Not Auto-Populating: Patient data not auto-filling.
+- Mapping Issue: PMS mapping incorrect.
+- Allergies/Problem/Medication Not Syncing: Questions not imported from EHR.
+- Allergies/Problem/Medication Write-back Issue: Write-back mapping incomplete.
+- Medical History Questions Not Syncing: Mismatch between Adit and EHR.
+- Medical History Write-back Issue: Mapping issue prevents update.
+- Allergies/Problem/Medication Missing: Missing or incomplete EHR data.
+- Signature Issue: Signature not displaying.
+- Multi-Sign Issue: Multiple signatures not configured.
+- Patient Form Importing Issue: Sync failure or wrong folder mapping.
+- Patient Form Missing After Submission: Form not visible after submission.
+- Device Connection Issue: Device disconnected or app outdated.
+- Field Dependency Issue: Conditional form logic broken.
+- PDF Sync Issue: PDF not created or not updated.
+- PDF Not Opening in EHR: PDF import issue into EHR.
+- Auto Import Issue: Auto-import toggle off or wrong link sent.
+- New Patient Updated Into Existing Patient: Wrong patient chart linked.
+- Existing Patient Updated With New Patient Details: Incorrect mapping during import.
+- PDF Layout Issue: Incorrect PDF layout rendering.
+- Patient Form Auto Assign Issue: Auto-approval toggle off.
+
+Category: Patient Card
+- Patient Details Missing: Patient metadata missing.
+- Patient Logs Missing: Activity logs missing.
+- Follow-Up Logs Missing: Follow-up logs not syncing.
+- Wrong Last/Next/Due Date: Dates incorrect due to EHR sync issue.
+- Image Missing: Patient photo upload failed.
+- Patient Form Search Issue: Form search not retrieving records.
+
+Category: Pozative Issue
+- Review Request Not Sent: Review request messages not sent.
+- Frequency Issue: Wrong review request frequency setup.
+- Business URL Missing: GMB URL not configured.
+- Business Page Disconnection: Google business page disconnected.
+- Feedback Issue: Feedback not appearing in portal.
+- Reviews Not Syncing: Reviews not syncing from Google/Facebook.
+
+Category: Email Issue
+- Email Bounce Back: TXT/DNS not verified.
+- Email Sending Issue: Incorrect email address or sending failure.
+- Email Attachment Issue: Attachments failing to upload.
+- Email Tags Issue: Tags not applying.
+- Email Reporting Issue: Reporting metrics not showing correctly.
+- Unsubscribe Issue: Unable to unsubscribe from email list.
 
 Category: Engage Issue
 - Appointment Reminder isn't received: Patients not receiving appointment reminders.
@@ -61,6 +142,8 @@ Category: Desktop Phones
 - LAN cable damaged / loose: LAN cable issue causing connectivity problems.
 - Bluetooth headset not connecting: Bluetooth headset pairing/connection issues.
 
+
+
 Category: Cordless Phones
 - Phone not ringing when receiving calls: Cordless device not ringing on inbound calls.
 - Unable to make outbound calls: Cordless device cannot place outbound calls.
@@ -76,15 +159,63 @@ Category: Cordless Phones
 - LAN cable damaged / loose: LAN issues for base station.
 - Bluetooth headset not connecting: Bluetooth pairing issues on cordless system.
 
-/* ✳️ CONTINUE for ALL remaining categories, subcategories and issue summaries
-   directly from the spreadsheet, following the same pattern:
+Category: Chat Issue
+- Chats not working: Live chat widget not opening or not visible.
+- Chats Deleted: Chats getting deleted automatically.
+- Chats not syncing: Messages delayed or not syncing across devices.
 
-Category: <Category Name>
-- <Subcategory 1>: <Issue summary text>
-- <Subcategory 2>: <Issue summary text>
-...
-*/
-`;
+Category: Bulk Issue
+- Bulk Upload / Import issue: Issue while uploading or migrating bulk data.
+- Bulk SMS Issue: Messages not being sent through bulk campaigns.
+- Bulk Email Issue: Emails failing during bulk messaging.
+
+Category: Form Issue
+- Form not loading: Adit forms not displaying for patients.
+- Form Submission Issue: Patients unable to submit forms successfully.
+- Mapping Issue: Data from forms not mapping into correct fields.
+
+Category: Review Issue
+- Reviews not coming: Reviews not syncing from sources such as Google or Facebook.
+- Review link not working: Patient review request link broken or not opening.
+
+Category: Billing Issue
+- Invoice Issue: Incorrect invoice or invoice not generating.
+- Refund Request: Client requesting refund due to incorrect transaction.
+
+Category: Campaign Issue
+- Campaign not working: Email or SMS campaigns not going out.
+- Tracking Issue: Campaign analytics not showing accurate data.
+
+Category: Call Tracking Issue
+- Number not working: Call tracking number not receiving inbound calls.
+- Call Forwarding Issue: Forwarding not working or routing to incorrect number.
+
+Category: Adit Pay
+- Payment Failure: Patients unable to complete payments.
+- Payout Delay: Payout delayed or not reflecting in account.
+- Refund Not Reflecting: Refund not visible in system.
+
+Category: Permission Issue
+- User Role Issue: Incorrect access permissions applied to user.
+- Access Denied: User unable to access restricted areas in Adit.
+
+Category: Telemed Issue
+- Video Not Working: Telemedicine video failing to load or start.
+- Audio Not Working: Audio problems during telemed sessions.
+- Link Not Working: Telemed appointment link invalid or expired.
+
+Category: Patient Sync Issue
+- Patient not syncing: Patient missing in Adit after syncing with EHR.
+- Duplicate Patient: Multiple profiles created for the same patient.
+
+Category: Analytics Issue
+- Report Wrong: Analytics reports show incorrect numbers.
+- Dashboard not loading: Dashboard freezing or failing to load data.
+
+Category: Appointment Issue
+- Unable to book appointment: Appointment booking fails or throws an error.
+- Appointment not syncing: Appointment not showing in Adit or EHR.
+
 
 // ------------ PROMPT (includes time per user & role + issue_summary) ------------
 const PROMPT = ({
