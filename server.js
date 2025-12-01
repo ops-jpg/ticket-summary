@@ -416,14 +416,25 @@ IMPORTANT RULES FOR OWNER CHANGE LOG:
 - Use the Owner Change Log timestamps to calculate time spent per user and per role.
 - Never guess the time. Only calculate from the timestamps provided.
 
-- If the Owner Change Log is null or empty:
-    * The ticket remained with the current owner for the full duration.
-    * Use the actual current owner name provided in the ticket details.
-    * Use the actual current owner role (derived from department/metadata).
-    * Return:
-        "time_spent_per_user": "<Current Owner Name> – full duration",
-        "time_spent_per_role": "<Current Owner Role> – full duration".
+IMPORTANT RULE — WHEN OWNER CHANGE LOG IS EMPTY:
+    • If the Owner Change Log is null, empty, or missing:
+         - The ticket stayed with the current owner for the FULL duration.
+         - The AI MUST CALCULATE that full duration using the  logic .
+               Example:
+                    full_duration = closedTime - createdTime
+                    OR
+                    full_duration = now() - createdTime
+         - Use the actual current owner name from ticket details.
+         - Use the actual current owner role (from Department or metadata).
 
+    • Return EXACTLY:
+          "time_spent_per_user": "<Current Owner Name> – <calculated full duration in hours>",
+          "time_spent_per_role": "<Current Owner Role> – <calculated full duration in hours>"
+
+ADDITIONAL RULES:
+    • Always round duration to nearest 0.5 hr.
+    • Do not include customers or external users in this calculation.
+    • Ignore system updates that do not change ownership.
 1. FOLLOW-UP AUDIT:
 Check if the agent promised any callback/follow-up and whether it was completed.
 Classify as exactly one of:
@@ -478,22 +489,21 @@ is enough.
 Return: "owner_time_summary": "<short remark>"
 
 6. TIME SPENT PER USER (MULTILINE TEXT):
-Calculate using timestamps from the Owner Change Log only.
-Format (example):
+Using the Owner Change Log, estimate time spent *per individual user/agent*.
+Return a multiline string like:
 "Mannat - 3 hrs
 Shikha - 2 hrs"
-If Owner Change Log is null:
-"Current Owner – full duration"
-Return as: "time_spent_per_user": "<multiline string>"
+Use whole hours or half-hours (e.g. 1.5 hrs) as approximate values.
+Return this as: "time_spent_per_user": "<multiline string>"
 
 7. TIME SPENT PER ROLE (MULTILINE TEXT):
-Calculate using timestamps from the Owner Change Log only.
-Format (example):
+Using the Owner Change Log, estimate time spent *per role/team*.
+Return a multiline string like:
 "Escalation Manager - 1 hr
 Adit Pay - 2 hrs"
-If Owner Change Log is null:
-"Current Owner Role – full duration"
-Return as: "time_spent_per_role": "<multiline string>"
+(Use the role/team names as they appear or can be reasonably inferred.)
+Return this as: "time_spent_per_role": "<multiline string>"
+
 
 Return a single JSON object only, with keys:
 {
