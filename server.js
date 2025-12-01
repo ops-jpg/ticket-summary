@@ -415,11 +415,14 @@ Evaluate follow-ups, tone, resolution quality, and how long the ticket stayed wi
 IMPORTANT RULES FOR OWNER CHANGE LOG:
 - Use the Owner Change Log timestamps to calculate time spent per user and per role.
 - Never guess the time. Only calculate from the timestamps provided.
-- If the Owner Change Log is null or empty, treat it as: 
-  "The ticket remained with the current owner for the full duration".
-  In this case:
-    "time_spent_per_user": "Current Owner – full duration",
-    "time_spent_per_role": "Current Owner Role – full duration".
+
+- If the Owner Change Log is null or empty:
+    * The ticket remained with the current owner for the full duration.
+    * Use the actual current owner name provided in the ticket details.
+    * Use the actual current owner role (derived from department/metadata).
+    * Return:
+        "time_spent_per_user": "<Current Owner Name> – full duration",
+        "time_spent_per_role": "<Current Owner Role> – full duration".
 
 1. FOLLOW-UP AUDIT:
 Check if the agent promised any callback/follow-up and whether it was completed.
