@@ -161,28 +161,28 @@ Category: Cordless Phones
 
 Category: Software
 Software	Notifications not working	Desktop or mobile notifications not triggering for incoming calls or messages.
-Software	Voicemail not working / setup issues	Users unable to access or configure voicemail settings correctly.
-Software	Softphone not working on Desktop	Desktop app softphone fails to connect or make calls.
-Software	Softphone not working on Android	Android softphone app fails to register or handle calls.
-Software	Softphone not working on iOS	iOS softphone app not registering or crashing during use.
-Software	Call park not working on app	Call park functionality unavailable or broken in mobile/desktop app.
-Software	Number assignment errors	Wrong or missing number assignment in the system or app.
-Software	Voicemail access errors	Errors while retrieving or accessing voicemail through app or portal.
-Software	Update or change label/name	Request to modify displayed name or label on app or device.
-Software	Wrong practice timezone configuration	Practice time zone configured incorrectly in portal settings.
-Software	Call flow errors	Incorrect or broken routing causing call flow failures.
+-	Voicemail not working / setup issues	Users unable to access or configure voicemail settings correctly.
+-	Softphone not working on Desktop:	Desktop app softphone fails to connect or make calls.
+-	Softphone not working on Android	:Android softphone app fails to register or handle calls.
+-	Softphone not working on iOS:	iOS softphone app not registering or crashing during use.
+-Call park not working on app	 :Call park functionality unavailable or broken in mobile/desktop app.
+- Number assignment errors :	Wrong or missing number assignment in the system or app.
+-	Voicemail access errors	:Errors while retrieving or accessing voicemail through app or portal.
+-	Update or change label/name :	Request to modify displayed name or label on app or device.
+-	Wrong practice timezone configuration :	Practice time zone configured incorrectly in portal settings.
+-	Call flow errors :	Incorrect or broken routing causing call flow failures.
 
 Category: Product / Carrier Issues
-Product / Carrier Issues	Need isolation testing	Require test calls or environment setup to isolate issue cause.
-Product / Carrier Issues	Whitelisting pending/not done	IP or port whitelisting not completed, affecting connectivity.
-Product / Carrier Issues	Device-specific problems	Issue isolated to a specific model or firmware version.
-Product / Carrier Issues	Server-related issues	Problem originating from server-side configuration or outage.
-Product / Carrier Issues	Carrier issue with Plivo	Carrier-side problem affecting call routing or delivery.
-Product / Carrier Issues	Carrier issue with Telnyx	Telnyx carrier routing or call completion issue.
-Product / Carrier Issues	Porting not completed / failed	Number port not yet completed or has failed validation.
-Product / Carrier Issues	Wrong or broken network configuration	Incorrect VLAN, DNS, or IP settings causing service disruption.
-Product / Carrier Issues	Receiver failure (audio issues)	Audio output failure due to hardware or network degradation.
-Product / Carrier Issues	Unable to send or open attachments	Attachments fail to upload or download in ticket/email communication.
+-	Need isolation testing :	Require test calls or environment setup to isolate issue cause.
+-	Whitelisting pending/not done :	IP or port whitelisting not completed, affecting connectivity.
+-	Device-specific problems	Issue : isolated to a specific model or firmware version.
+-	Server-related issues	:Problem originating from server-side configuration or outage.
+-	Carrier issue with Plivo	:Carrier-side problem affecting call routing or delivery.
+-	Carrier issue with Telnyx	:Telnyx carrier routing or call completion issue.
+-	Porting not completed / failed:	Number port not yet completed or has failed validation.
+-	Wrong or broken network configuration :	Incorrect VLAN, DNS, or IP settings causing service disruption.
+-	Receiver failure (audio issues)	:Audio output failure due to hardware or network degradation.
+-	Unable to send or open attachments	 :Attachments fail to upload or download in ticket/email communication.
 
 Category: Audio Quality – Inbound
 Audio Quality – Inbound	Internet speed too low	Low bandwidth on client side causing degraded inbound audio.
