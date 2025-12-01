@@ -609,12 +609,12 @@ Return:
 REFERENCE LIST:
 ${REFERENCE_LIST}
 
-3. SCORING (0–10 each, integers):
+3. SCORING (0–5 each, integers):
 - Follow-Up Frequency
 - No Drops
 - SLA Adherence
 - Resolution Quality
-- Customer Sentiment (0–10, treat -10..+10 notes as 0..10)
+- Customer Sentiment (0–5, treat -10..+10 notes as 0..10)
 - Agent Tone
 
 Also provide a short 1–2 sentence reason for *each* score:
@@ -643,19 +643,22 @@ is enough.
 Return: "owner_time_summary": "<short remark>"
 
 6. TIME SPENT PER USER (MULTILINE TEXT):
-Calculate time spent per user STRICTLY from the Owner Change Log timestamps. 
-Do not guess. 
-If no timestamps exist or log is null, assume the ticket stayed with the SAME owner for the entire duration.
-Return:
-"CEO - 3 hrs\nBilling - 2 hrs"
+Calculate using timestamps from the Owner Change Log only.
+Format (example):
+"Mannat - 3 hrs
+Shikha - 2 hrs"
+If Owner Change Log is null:
+"Current Owner – full duration"
+Return as: "time_spent_per_user": "<multiline string>"
 
 7. TIME SPENT PER ROLE (MULTILINE TEXT):
-Calculate time spent per role STRICTLY from the Owner Change Log timestamps. 
-Do not guess. 
-If no timestamps exist or log is null, assume the ticket stayed with the SAME owner for the entire duration.
-Return:
-"Mannat - 3 hrs\nShikha - 2 hrs"
-
+Calculate using timestamps from the Owner Change Log only.
+Format (example):
+"Escalation Manager - 1 hr
+Adit Pay - 2 hrs"
+If Owner Change Log is null:
+"Current Owner Role – full duration"
+Return as: "time_spent_per_role": "<multiline string>"
 
 Return a single JSON object only, with keys:
 {
