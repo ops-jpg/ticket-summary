@@ -11,395 +11,393 @@ app.use(express.json({ limit: "2mb" }));
 
 // ------------ ENV VARS ------------
 const DESK_SHARED_SECRET = process.env.DESK_SHARED_SECRET;
-const OPENAI_API_KEY     = process.env.OPENAI_API_KEY;
-const ZOHO_ORG_ID        = process.env.ZOHO_ORG_ID;
-const ZOHO_OAUTH_TOKEN   = process.env.ZOHO_OAUTH_TOKEN;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const ZOHO_ORG_ID = process.env.ZOHO_ORG_ID;
+const ZOHO_OAUTH_TOKEN = process.env.ZOHO_OAUTH_TOKEN;
 
-// ------------ CATEGORY / SUBCATEGORY / ISSUE SUMMARY LIST ------------
-// Format: for EACH row from your spreadsheet:
-// Category: <Category>
-// - <Subcategory>: <Issue Summary>
-//
-// Below are some examples from your xlsx. Continue this pattern
-// until ALL rows from the sheet are covered.
+// ------------ BUSINESS HOURS (CST / Central Standard Time) ------------
+// From your screenshot: Mon-Fri 08:00 AM - 06:00 PM CST. Closed Sat/Sun.
+const BUSINESS_TZ = "America/Chicago";
+const BUSINESS_DAYS = [1, 2, 3, 4, 5]; // Mon..Fri (JS getDay(): Sun=0)
+const BUSINESS_START_MIN = 8 * 60; // 08:00
+const BUSINESS_END_MIN = 18 * 60; // 18:00
 
+// ------------ CATEGORY / SUBCATEGORY / ISSUE SUMMARY (COMPACT) ------------
 const REFERENCE_LIST = `
+OS Issue:
+- Mapping: OS mapping mismatch vs EHR
+- Configuration: OS setup/config needed
+- Appointment Write problem into EHR: writeback off/fails
+- Wrong Appointment Time: booked time wrong
+- Slot Missing: slots missing vs EHR
+- Slot Available on Block / Holiday: blocked/holiday slots visible
+- Provider Hours Missing: provider hours missing
+- Operatory Hours Missing: operatory hours wrong/missing
+- Business Hours Missing: hours mismatch EHR vs Adit
+- Incorrect Slots Appear: slots not blocked per EHR
+- Forms Configuration Issue: OS webforms/microsite misconfig
 
-Category: OS Issue
-- Mapping: Online scheduling mapping mismatch with EHR.
-- Configuration: Online scheduling configuration needed or incorrect.
-- Appointment Write problem into EHR: Appointment write-back toggle off or failing.
-- Wrong Appointment Time: Wrong time booked vs EHR schedule.
-- Slot Missing: Schedule slots missing vs EHR.
-- Slot Available on Block / Holiday: Blocked/holiday slots still available.
-- Provider Hours Missing: Provider hours not configured or missing.
-- Operatory Hours Missing: Operatory hours not set correctly.
-- Business Hours Missing: Business hours mismatch between EHR and Adit.
-- Incorrect Slots Appear: Slots not blocked or reflecting EHR config.
-- Forms Configuration Issue: Webforms not configured for OS microsite.
+Engage Issue:
+- Appointment Reminder Isn't Received: AR not received
+- Appointment Reminder Setup Issue: AR workflow/config missing
+- Appointment Reminder With Incorrect Time: AR time wrong/out of sync
+- Appointment Reminder Delay: AR late
+- SC Isn't Received: SC not sent
+- SC Issue for New & Existing Patient: SC flow wrong by patient type
+- SC Issue With Patient Forms: SC missing forms
+- AR Cron Issue: AR cron down
+- SC Cron Issue: SC cron down
+- BR Sent to Inactive Patients: BR to inactive
+- BR Sent to Wrong Patient: BR wrong patient
+- BR Not Sent: BR not triggered
+- Recall Reminder Not Sent: recall not sent
+- Recall Reminder to Inactive Patient: recall to inactive
+- Recall Sent to Wrong Patient: recall wrong patient
+- Recall Not Sent Despite Appointment: appt exists but no recall
+- Recall Types Issue: recall types/toggles missing
+- Recall Due Date Issue: recall due date wrong
+- Payment Reminder Issue: payment reminders not sent
+- Missed Call Text Issue: missed call text not sent (config/hours)
+- Auto Confirmation Issue: auto-confirm not updating
+- Appointment Write Issue: appt not written from OS
+- Multiple Appointment Confirmed Issue: multi-confirm handling wrong
+- Auto Confirm Thank You Issue: wrong thank-you
+- Status Mapping Issue: status mapping wrong
+- Auto Confirmation Mapping Issue: EHR not updating after confirm
+- Auto Confirmation Reply Issue: auto-confirm reply not sent
+- Chat Thread Not Updated: chat not syncing
+- Wrong Chat Populate: wrong chat mapping/delay
+- Chat Thread Missing: chat thread missing
 
-Category: Engage Issue
-- Appointment Reminder Isn't Received: Patient not receiving reminders.
-- Appointment Reminder Setup Issue: Reminder workflows not configured.
-- Appointment Reminder With Incorrect Time: Reminder time wrong or out of sync.
-- Appointment Reminder Delay: Reminder sent late vs schedule.
-- SC Isn't Received: Schedule confirmation not sent.
-- SC Issue for New & Existing Patient: SC flow not correct per patient type.
-- SC Issue With Patient Forms: Forms missing in SC workflow.
-- AR Cron Issue: Reminder CRON not running.
-- SC Cron Issue: Schedule confirmation CRON not running.
-- BR Sent to Inactive Patients: Birthday reminders sent to inactive records.
-- BR Sent to Wrong Patient: Birthday reminder mapped to wrong patient.
-- BR Not Sent: Birthday reminders not triggered.
-- Recall Reminder Not Sent: Recall reminders not going out.
-- Recall Reminder to Inactive Patient: Recall going to inactive patient.
-- Recall Sent to Wrong Patient: Recall mapped to wrong patient.
-- Recall Not Sent Despite Appointment: Appointment exists but no recall.
-- Recall Types Issue: Recall types/toggles missing or off.
-- Recall Due Date Issue: Incorrect recall due date.
-- Payment Reminder Issue: Payment reminders not sending.
-- Missed Call Text Issue: Missed-call text not going due to config/hours.
-- Auto Confirmation Issue: Auto-confirmation not updating status.
-- Appointment Write Issue: Appointment not written from OS to schedule.
-- Multiple Appointment Confirmed Issue: Multiple confirmations not handled correctly.
-- Auto Confirm Thank You Issue: Wrong auto “thank you” message.
-- Status Mapping Issue: Status mapping incorrect between systems.
-- Auto Confirmation Mapping Issue: EHR not updating after Adit confirm.
-- Auto Confirmation Reply Issue: Auto confirmation reply not going.
-- Chat Thread Not Updated: Chat not syncing between Adit and EHR.
-- Wrong Chat Populate: Wrong chat mapping or delayed sync.
-- Chat Thread Missing: Chat thread missing in UI.
+Patient Form Issue:
+- Patient Form Not Sending: not sent (bad email/phone)
+- Patient Form Not Received: not received in Adit/EHR
+- Form Details Not Auto-Populating: autofill missing
+- Mapping Issue: PMS mapping wrong
+- Allergies/Problem/Medication Not Syncing: APM not imported
+- Allergies/Problem/Medication Write-back Issue: APM writeback fails
+- Medical History Questions Not Syncing: MH questions not synced
+- Medical History Write-back Issue: MH writeback fails
+- Allergies/Problem/Medication Missing: APM missing
+- Signature Issue: signature missing
+- Multi-Sign Issue: multi-sign misconfig
+- Patient Form Importing Issue: import sync fails
+- Patient Form Missing After Submission: submitted form missing
+- Device Connection Issue: kiosk/device disconnected/outdated
+- Field Dependency Issue: conditional logic broken
+- PDF Sync Issue: PDF not generated/synced
+- PDF Not Opening in EHR: PDF not viewable in EHR
+- Auto Import Issue: auto-import off/wrong link
+- New Patient Updated Into Existing Patient: wrong chart link
+- Existing Patient Updated With New Patient Details: overwrite wrong
+- PDF Layout Issue: PDF formatting wrong
+- Patient Form Auto Assign Issue: auto-assign/approve fails
 
-Category: Patient Form Issue
-- Patient Form Not Sending: Form not sent due to wrong email/phone.
-- Patient Form Not Received: Form not received in Adit/EHR.
-- Form Details Not Auto-Populating: Patient data not autofilling.
-- Mapping Issue: PMS field mapping incorrect.
-- Allergies/Problem/Medication Not Syncing: A/P/M not imported from EHR.
-- Allergies/Problem/Medication Write-back Issue: A/P/M write-back failing.
-- Medical History Questions Not Syncing: Medical history questions not synced.
-- Medical History Write-back Issue: Medical history write-back failing.
-- Allergies/Problem/Medication Missing: A/P/M data missing from EHR.
-- Signature Issue: Signature not captured or displayed.
-- Multi-Sign Issue: Multiple signatures not configured.
-- Patient Form Importing Issue: Form import sync failure.
-- Patient Form Missing After Submission: Submitted form not visible.
-- Device Connection Issue: Kiosk/tablet device disconnected or outdated.
-- Field Dependency Issue: Dependent fields/logic broken.
-- PDF Sync Issue: PDF not generated or synced.
-- PDF Not Opening in EHR: PDF not viewable in EHR.
-- Auto Import Issue: Auto-import toggle off or wrong link used.
-- New Patient Updated Into Existing Patient: New form linked to wrong existing chart.
-- Existing Patient Updated With New Patient Details: Existing chart overwritten incorrectly.
-- PDF Layout Issue: PDF layout or formatting incorrect.
-- Patient Form Auto Assign Issue: Auto-assign/auto-approve not working.
+Patient Card:
+- Patient Details Missing: details missing
+- Patient Logs Missing: logs missing
+- Follow-Up Logs Missing: follow-up logs missing
+- Wrong Last/Next/Due Date: dates wrong
+- Image Missing: photo missing
+- Patient Form Search Issue: form search fails
 
-Category: Patient Card
-- Patient Details Missing: Patient info not visible.
-- Patient Logs Missing: Activity logs missing.
-- Follow-Up Logs Missing: Follow-up records missing.
-- Wrong Last/Next/Due Date: Last/next/due dates incorrect.
-- Image Missing: Patient photo not loading.
-- Patient Form Search Issue: Forms not found in search.
+Pozative Issue:
+- Review Request Not Sent: review request not sent
+- Frequency Issue: review frequency wrong
+- Business URL Missing: business/GMB URL missing
+- Business Page Disconnection: GBP disconnected
+- Feedback Issue: feedback missing
+- Reviews Not Syncing: reviews not syncing
 
-Category: Pozative Issue
-- Review Request Not Sent: Review requests not sent.
-- Frequency Issue: Review request frequency wrong.
-- Business URL Missing: GMB/Business URL not configured.
-- Business Page Disconnection: Google business page disconnected.
-- Feedback Issue: Feedback missing in portal.
-- Reviews Not Syncing: Reviews not syncing from sources.
+Email Issue:
+- Email Bounce Back: DNS/TXT issue
+- Email Sending Issue: email not sending
+- Email Attachment Issue: attachment failures
+- Email Tags Issue: tags not applied
+- Email Reporting Issue: reporting wrong
+- Unsubscribe Issue: unsubscribe fails
 
-Category: Email Issue
-- Email Bounce Back: Email bouncing due to DNS/TXT issues.
-- Email Sending Issue: Emails not sending.
-- Email Attachment Issue: Attachments not uploading/downloading.
-- Email Tags Issue: Email tags not applied.
-- Email Reporting Issue: Email metrics/reporting incorrect.
-- Unsubscribe Issue: Unsubscribe not working.
+Desktop Phones:
+- Phone not ringing when receiving calls: no ring
+- Unable to make outbound calls: outbound fails
+- Account not registered / logged out: SIP unregistered
+- Keys not responding or malfunctioning: keys fail
+- Phone not powering on / random shutdowns: power/reboot
+- Call park not working: call park fails
+- Firmware not updating or stuck update: fw update stuck
+- Receiver not working / no audio: no audio
+- Faulty handset or LAN ports: hardware/ports
+- LAN cable damaged / loose: cable/connection
+- Bluetooth headset not connecting: BT pairing
 
-Category: Desktop Phones
-- Phone not ringing when receiving calls: No ring on inbound calls.
-- Unable to make outbound calls: Outbound calls failing.
-- Account not registered / logged out: SIP not registered / logged out.
-- Keys not responding or malfunctioning: Buttons not working.
-- Phone not powering on / random shutdowns: Power or reboot issues.
-- Call park not working: Call park feature failing.
-- Firmware not updating or stuck update: Firmware update stuck.
-- Receiver not working / no audio: No audio in receiver.
-- Faulty handset or LAN ports: Hardware or port fault.
-- LAN cable damaged / loose: LAN cable or connection issue.
-- Bluetooth headset not connecting: Bluetooth pairing issue.
+Cordless Phones:
+- Phone not ringing when receiving calls: no ring
+- Unable to make outbound calls: outbound fails
+- Account not registered / logged out: SIP unregistered
+- Phone goes out of range: range loss
+- Base station offline or disconnected: base offline
+- Keys not responding or malfunctioning: keys fail
+- Phone not powering on / random shutdowns: power/battery
+- Call park not working: call park fails
+- Firmware not updating or stuck update: fw update stuck
+- Receiver not working / no audio: no audio
+- Faulty handset or LAN ports: hardware/ports
+- LAN cable damaged / loose: cable/connection
+- Bluetooth headset not connecting: BT pairing
 
-Category: Cordless Phones
-- Phone not ringing when receiving calls: Cordless not ringing.
-- Unable to make outbound calls: Cordless outbound failing.
-- Account not registered / logged out: Cordless SIP not registered.
-- Phone goes out of range: Handset losing range.
-- Base station offline or disconnected: Base station offline.
-- Keys not responding or malfunctioning: Handset keys not working.
-- Phone not powering on / random shutdowns: Power/battery issues.
-- Call park not working: Call park not working on cordless.
-- Firmware not updating or stuck update: Cordless firmware stuck.
-- Receiver not working / no audio: No audio on cordless.
-- Faulty handset or LAN ports: Faulty handset/base ports.
-- LAN cable damaged / loose: LAN issues on base.
-- Bluetooth headset not connecting: Bluetooth not pairing.
+Software:
+- Notifications not working: notifications fail
+- Voicemail not working / setup issues: VM config/access
+- Softphone not working on Desktop: desktop softphone fails
+- Softphone not working on Android: android softphone fails
+- Softphone not working on iOS: iOS softphone fails
+- Call park not working on app: app call park fails
+- Number assignment errors: number assignment wrong
+- Voicemail access errors: VM access errors
+- Update or change label/name: label change
+- Wrong practice timezone configuration: timezone wrong
+- Call flow errors: routing/callflow errors
 
-Category: Software
-- Notifications not working: Call/message notifications not firing.
-- Voicemail not working / setup issues: Voicemail access/config issues.
-- Softphone not working on Desktop: Desktop softphone not registering or calling.
-- Softphone not working on Android: Android softphone failing.
-- Softphone not working on iOS: iOS softphone failing or crashing.
-- Call park not working on app: Call park broken in app.
-- Number assignment errors: Wrong/missing number assignment.
-- Voicemail access errors: Errors accessing voicemail.
-- Update or change label/name: Label/name change request.
-- Wrong practice timezone configuration: Timezone configured incorrectly.
-- Call flow errors: Call flow route errors.
+Product / Carrier Issues:
+- Need isolation testing: isolation testing needed
+- Whitelisting pending/not done: whitelisting incomplete
+- Device-specific problems: device/model specific
+- Server-related issues: server config/outage
+- Carrier issue with Plivo: plivo carrier issue
+- Carrier issue with Telnyx: telnyx carrier issue
+- Porting not completed / failed: port stuck/failed
+- Wrong or broken network configuration: network misconfig
+- Receiver failure (audio issues): audio output failure
+- Unable to send or open attachments: attachments fail
 
-Category: Product / Carrier Issues
-- Need isolation testing: Need isolation tests to find cause.
-- Whitelisting pending/not done: IP/port whitelisting incomplete.
-- Device-specific problems: Issue limited to certain device/model.
-- Server-related issues: Server-side config/outage problem.
-- Carrier issue with Plivo: Plivo carrier problem.
-- Carrier issue with Telnyx: Telnyx carrier problem.
-- Porting not completed / failed: Number port stuck or failed.
-- Wrong or broken network configuration: Network/VLAN/DNS misconfig.
-- Receiver failure (audio issues): Audio output failure.
-- Unable to send or open attachments: Attachments failing in comms.
+Audio Quality – Inbound:
+- Internet speed too low: low bandwidth
+- High call latency / delay: latency/delay
+- Call fluctuations / instability: jitter/packet loss
+- One-way audio (hear only one side): one-way
+- Crackling/static noise: static
+- Whitelisting required: needs whitelist
+- Client expectation not met: below expectation
 
-Category: Audio Quality – Inbound
-- Internet speed too low: Inbound audio poor due to low bandwidth.
-- High call latency / delay: Inbound audio delay.
-- Call fluctuations / instability: Inbound audio fluctuating.
-- One-way audio (hear only one side): One-way inbound audio.
-- Crackling/static noise: Noisy inbound audio.
-- Whitelisting required: Inbound audio fixed by whitelisting.
-- Client expectation not met: Inbound audio below expectations.
+Audio Quality – Outbound:
+- Internet speed too low: low upload
+- High call latency / delay: latency/delay
+- Call fluctuations / instability: jitter/packet loss
+- One-way audio (hear only one side): one-way
+- Crackling/static noise: static
+- Whitelisting required: needs whitelist
+- Client expectation not met: below expectation
 
-Category: Audio Quality – Outbound
-- Internet speed too low: Outbound audio poor due to low upload.
-- High call latency / delay: Outbound audio delayed.
-- Call fluctuations / instability: Outbound audio cutting or unstable.
-- One-way audio (hear only one side): One-way outbound audio.
-- Crackling/static noise: Noisy outbound audio.
-- Whitelisting required: Outbound audio needs whitelisting.
-- Client expectation not met: Outbound audio below expectations.
+Audio Quality – Both Directions:
+- Internet speed too low: low bandwidth
+- High call latency / delay: latency/delay
+- Call fluctuations / instability: jitter/packet loss
+- One-way audio (hear only one side): one-way
+- Crackling/static noise: static
+- Whitelisting required: needs whitelist
+- Client expectation not met: below expectation
 
-Category: Audio Quality – Both Directions
-- Internet speed too low: Low bandwidth affecting both sides.
-- High call latency / delay: Two-way audio lag.
-- Call fluctuations / instability: Two-way instability.
-- One-way audio (hear only one side): Persistent one-way issues.
-- Crackling/static noise: Static in both directions.
-- Whitelisting required: Two-way audio fixed by whitelisting.
-- Client expectation not met: Two-way quality below expectations.
+Caller Name / ID:
+- Receiving spam calls: spam calls
+- Wrong caller name displayed: name wrong
+- Caller ID mismatch: CID mismatch
+- Need to update label name: label update
 
-Category: Caller Name / ID
-- Receiving spam calls: High spam/robocall volume.
-- Wrong caller name displayed: Caller name shown wrong.
-- Caller ID mismatch: Caller ID not matching number.
-- Need to update label name: Caller ID label change request.
+General Enquiries:
+- Request for product information: product info
+- Asking for a new feature: feature request
+- Questions on managing users: user mgmt
+- Questions on managing permissions: permissions
+- Client expectation queries: expectations
 
-Category: General Enquiries
-- Request for product information: Questions on product/features.
-- Asking for a new feature: New feature request.
-- Questions on managing users: User management questions.
-- Questions on managing permissions: Permission/access questions.
-- Client expectation queries: Clarification on expectations.
+Custom Fix:
+- Enable/disable hold reminder tone: hold tone
+- Adjust timezone settings: timezone
+- Change call waiting tone: waiting tone
+- Error during upgrade (timeout): upgrade timeout
+- Setup speed dials: speed dials
+- Add more call park lines: more park lines
+- Provide a feature-specific workaround: workaround
 
-Category: Custom Fix
-- Enable/disable hold reminder tone: Hold reminder tone change.
-- Adjust timezone settings: Timezone correction request.
-- Change call waiting tone: Change call waiting tone.
-- Error during upgrade (timeout): Upgrade timeout issue.
-- Setup speed dials: Speed dial setup help.
-- Add more call park lines: More call park lines requested.
-- Provide a feature-specific workaround: Temporary feature workaround.
+Bugs & Defects:
+- Mobile app crashing: mobile crash
+- Desktop app crashing: desktop crash
+- Softphone bugs: softphone bugs
+- Firmware-related bugs: firmware bugs
+- Notifications not working: notification bug
+- Unable to answer or hang up calls: answer/hangup fails
+- Hardware defect: hardware defect
+- Voicemail issues: VM bugs
+- Hold music not working: hold music fails
+- Audio library not working: audio library fails
+- Software glitches: glitches
+- Call tracking not working: call tracking fails
+- Call flow not working: call flow fails
+- Call override not working: override fails
 
-Category: Bugs & Defects
-- Mobile app crashing: Mobile app crash.
-- Desktop app crashing: Desktop app crash/freeze.
-- Softphone bugs: Softphone bug behavior.
-- Firmware-related bugs: Firmware-level defect.
-- Notifications not working: Notification bug.
-- Unable to answer or hang up calls: Call answer/hangup not working.
-- Hardware defect: Physical device defect.
-- Voicemail issues: Voicemail-related bug.
-- Hold music not working: Hold music failure.
-- Audio library not working: Audio library issues.
-- Software glitches: UI/logic glitches.
-- Call tracking not working: Call tracking module failing.
-- Call flow not working: Call flow not executing.
-- Call override not working: Override not applying.
+Call Drop:
+- Network issues causing call drop: network drops
+- Firmware bug causing call drop: firmware drops
+- Whitelisting pending/not done: whitelist drops
 
-Category: Call Drop
-- Network issues causing call drop: Drops due to network.
-- Firmware bug causing call drop: Drops due to firmware bug.
-- Whitelisting pending/not done: Drops due to missing whitelisting.
+Installations:
+- New phone installation: new install
+- Replacement phone install: replacement install
+- Partial phone installation: partial install
+- V3 migration setup: v3 migration
+- Bluetooth headset installation: BT headset setup
 
-Category: Installations
-- New phone installation: New phones install/setup.
-- Replacement phone install: Replacement phone install.
-- Partial phone installation: Incomplete install.
-- V3 migration setup: Migration to V3 setup.
-- Bluetooth headset installation: Bluetooth headset pairing/setup.
+Training:
+- Call Flow Training: call flow/IVR training
+- Phone feature training: phone features
+- Desktop app training: desktop app
+- Mobile app training: mobile app
+- Call override training: call override
+- eFax training: eFax
+- Block caller: block caller
+- Hold music: hold music
+- Audio library: audio library
+- Multilocation call transfer: multi-location transfer
+- Conference call setup: conference setup
+- Enable patient card: enable patient card
+- Enable call pop up: call pop up
+- Call tracking: call tracking
+- E911 Setup: E911
+- Multiple Voicemail Box: multi VM box
 
-Category: Training
-- Call Flow Training: Training on call flow/IVR.
-- Phone feature training: Phone feature training.
-- Desktop app training: Desktop app training.
-- Mobile app training: Mobile app training.
-- Call override training: Call override training.
-- eFax training: eFax usage training.
-- Block caller: How to block callers.
-- Hold music: How to set hold music.
-- Audio library: Managing audio library.
-- Multilocation call transfer: Multi-location transfer config.
-- Conference call setup: Conference call setup training.
-- Enable patient card: How to enable patient card.
-- Enable call pop up: How to enable call pop-ups.
-- Call tracking: Call tracking configuration training.
-- E911 Setup: E911 setup guidance.
-- Multiple Voicemail Box: Multiple voicemail box setup.
+Mass Texting:
+- Not able to stop mass text: cannot stop
+- Not able to select segment in mass text: cannot select segment
 
-Category: Mass Texting
-- Not able to stop mass text: Cannot stop mass text in progress.
-- Not able to select segment in mass text: Cannot select segment when building campaign.
+ASAP:
+- Wrong patient appear in ASAP: wrong patients
+- No patient in ASAP list: list empty
 
-Category: ASAP
-- Wrong patient appear in ASAP: Wrong patients listed in ASAP.
-- No patient in ASAP list: ASAP list empty; manual selection needed.
+Internal Chat:
+- Messages not received: not received
+- Not able to delete chat: cannot delete
+- Message delay: delayed
 
-Category: Internal Chat
-- Messages not received: Internal chat messages not received.
-- Not able to delete chat: Cannot delete chat messages.
-- Message delay: Chat messages delayed.
+Others:
+- Notification Missing: missing
+- Notification read issue: cannot open
+- Notification not redirecting: redirect fail
+- Dual notification issue: duplicates
+- App Lag Issue: app lag
+- Server disconnection: disconnect if server off
+- EHR Sync break: EHR sync broken
+- Frequent Disconnect: frequent disconnects
+- Adit app slow in web: web slow
+- Adit app slow in desktop app: desktop slow
+- Status mapping issue: status mapping wrong
+- Wrong business hours: BH misconfig
 
-Category: Others
-- Notification Missing: Notifications not showing.
-- Notification read issue: Notifications not opening.
-- Notification not redirecting: Notification link not redirecting.
-- Dual notification issue: Duplicate notifications.
-- App Lag Issue: Desktop app lagging.
-- Server disconnection: Disconnect when server off.
-- EHR Sync break: EHR sync broken.
-- Frequent Disconnect: Frequent network/service drops.
-- Adit app slow in web: Web app slow; cache/cookies needed.
-- Adit app slow in desktop app: Desktop app slow.
-- Status mapping issue: Status mapping incorrect.
-- Wrong business hours: Business hours misconfigured.
+Server App:
+- EHR/PMS Disconnected Error on Adit app: disconnected
+- Patient forms are not syncing: forms not syncing
+- Reminders not going out: reminders blocked
+- Payments not syncing: pay not syncing
+- EHR disconnected: EHR down
+- Practice Analytics not syncing: PA not syncing
+- Server app resync: resync needed
+- Server app reinstall: reinstall needed
+- Server app install: install needed
+- EHR change: EHR change needed
+- EHR disconnection frequently: frequent disconnects
+- Server system changed: system changed
+- High CPU usage: high CPU
+- EHR Crashing: EHR crash
+- Server Crashing: server crash
+- EHR upgrade: EHR upgrade
+- Server App upgrade: server app upgrade
+- Cloud EHR install: cloud install
+- Chrome Extension not working: ext not working
+- Chrome Extension installation: ext install
 
-Category: Server App
-- EHR/PMS Disconnected Error on Adit app: EHR/PMS disconnected.
-- Patient forms are not syncing: Forms not syncing via server app.
-- Reminders not going out: Reminders blocked by server app issue.
-- Payments not syncing: Adit Pay payments not syncing.
-- EHR disconnected: EHR fully disconnected.
-- Practice Analytics not syncing: PA not syncing.
-- Server app resync: Server app needs resync.
-- Server app reinstall: Server app reinstall needed.
-- Server app install: Initial server app install.
-- EHR change: EHR/PMS change needed.
-- EHR disconnection frequently: Frequent EHR disconnects.
-- Server system changed: Server system change causing issues.
-- High CPU usage: High CPU use on server.
-- EHR Crashing: EHR app crashing.
-- Server Crashing: Server crashes.
-- EHR upgrade: EHR upgrade required.
-- Server App upgrade: Server app upgrade needed.
-- Cloud EHR install: Cloud EHR install required.
-- Chrome Extension not working: Chrome extension not working.
-- Chrome Extension installation: Chrome extension install help.
+Adit Pay:
+- Ledger Posting: not posting
+- Payment Issue: payments issue
+- Terminal Issues: terminal issue
+- Hardware Replacement/Return: hardware RMA
+- Demo/Basic Inquiry: demo/info
+- Walkthrough Training: training
+- Sign Up/Set Up: onboarding
+- Terminal Registration: registration
+- Price Comparison: price compare
+- Feature Request: feature request
+- Bugs/Outage: bugs/outage
+- Configuration/Settings: config
+- Basic Troubleshooting: troubleshooting
+- EHR Disconnection: EHR disconnect
+- Payment Failure: payment fails
+- Payout Delay: payout delayed
+- Refund Not Reflecting: refund missing
 
-Category: Adit Pay
-- Ledger Posting: Payments not posting to ledger.
-- Payment Issue: General payment sync issue.
-- Terminal Issues: Card terminal malfunction.
-- Hardware Replacement/Return: Pay hardware RMA.
-- Demo/Basic Inquiry: Info/demo request for Adit Pay.
-- Walkthrough Training: Adit Pay training.
-- Sign Up/Set Up: Adit Pay onboarding/setup.
-- Terminal Registration: Terminal registration needed.
-- Price Comparison: Compare Adit Pay pricing.
-- Feature Request: Adit Pay feature request.
-- Bugs/Outage: Adit Pay bugs/outage.
-- Configuration/Settings: Adit Pay config issue.
-- Basic Troubleshooting: Basic Pay troubleshooting.
-- EHR Disconnection: Adit Pay disconnected via server app.
-- Payment Failure: Payment cannot be completed.
-- Payout Delay: Payout delayed.
-- Refund Not Reflecting: Refund not visible.
+Practice Analytics:
+- Sync: sync/load fails
+- Data issues: data wrong
+- Preferences: preferences/goals
+- Training: training
+- Upgrade to Analytics: upgrade request
+- Feature Requests: feature request
+- Patient list Requests: patient list help
+- Export: export fails
+- Daily, Weekly, Monthly Reports: report filters/view fail
 
-Category: Practice Analytics
-- Sync: PA data not syncing/loading.
-- Data issues: PA data inaccurate.
-- Preferences: Issues with goals/follow-ups/team prefs.
-- Training: PA training required.
-- Upgrade to Analytics: Upgrade to Analytics bundle.
-- Feature Requests: PA feature requests.
-- Patient list Requests: Help with patient lists.
-- Export: Export errors from PA.
-- Daily, Weekly, Monthly Reports: Report filters/view not working.
+Chat Issue:
+- Chats not working: widget not opening
+- Chats Deleted: auto-deleted
+- Chats not syncing: not syncing
 
-Category: Chat Issue
-- Chats not working: Live chat widget not opening.
-- Chats Deleted: Chats auto-deleting.
-- Chats not syncing: Chat not syncing across devices.
+Bulk Issue:
+- Bulk Upload / Import issue: import/upload fails
+- Bulk SMS Issue: bulk SMS fails
+- Bulk Email Issue: bulk email fails
 
-Category: Bulk Issue
-- Bulk Upload / Import issue: Bulk import/upload failing.
-- Bulk SMS Issue: Bulk SMS not sending.
-- Bulk Email Issue: Bulk email failing.
+Form Issue:
+- Form not loading: not loading
+- Form Submission Issue: submit fails
+- Mapping Issue: mapping wrong
 
-Category: Form Issue
-- Form not loading: Forms not loading.
-- Form Submission Issue: Form submit failing.
-- Mapping Issue: Form data mapping incorrect.
+Review Issue:
+- Reviews not coming: not syncing
+- Review link not working: link broken
 
-Category: Review Issue
-- Reviews not coming: Reviews not syncing in.
-- Review link not working: Review link broken.
+Billing Issue:
+- Invoice Issue: invoice wrong/missing
+- Refund Request: refund requested
 
-Category: Billing Issue
-- Invoice Issue: Invoice incorrect/not generating.
-- Refund Request: Refund request on transaction.
+Campaign Issue:
+- Campaign not working: not sending
+- Tracking Issue: tracking wrong
 
-Category: Campaign Issue
-- Campaign not working: Campaigns not sending.
-- Tracking Issue: Campaign tracking inaccurate.
+Call Tracking Issue:
+- Number not working: number dead
+- Call Forwarding Issue: forwarding wrong
 
-Category: Call Tracking Issue
-- Number not working: Tracking number not receiving calls.
-- Call Forwarding Issue: Forwarding not working or wrong.
+Permission Issue:
+- User Role Issue: wrong role
+- Access Denied: access denied
 
-Category: Permission Issue
-- User Role Issue: Wrong role/permission for user.
-- Access Denied: User access denied to area.
+Telemed Issue:
+- Video Not Working: video fails
+- Audio Not Working: audio fails
+- Link Not Working: link invalid
 
-Category: Telemed Issue
-- Video Not Working: Telemed video failing.
-- Audio Not Working: Telemed audio failing.
-- Link Not Working: Telemed link invalid or expired.
+Patient Sync Issue:
+- Patient not syncing: missing patient
+- Duplicate Patient: duplicates
 
-Category: Patient Sync Issue
-- Patient not syncing: Patient not synced into Adit.
-- Duplicate Patient: Duplicate patient records.
+Analytics Issue:
+- Report Wrong: numbers wrong
+- Dashboard not loading: dashboard fails
 
-Category: Analytics Issue
-- Report Wrong: Analytics numbers incorrect.
-- Dashboard not loading: Dashboard not loading data.
-
-Category: Appointment Issue
-- Unable to book appointment: Booking throws error or fails.
-- Appointment not syncing: Appointment not showing in Adit/EHR.
-
+Appointment Issue:
+- Unable to book appointment: booking fails
+- Appointment not syncing: not in Adit/EHR
 `;
 
- // ------------ PROMPT (includes time per user & role + issue_summary) ------------
+// ------------ PROMPT ------------
 const PROMPT = ({
   subject,
   status,
@@ -408,104 +406,123 @@ const PROMPT = ({
   department,
   conversation,
   ownerChangeLog,
+  createdTime,
+  closedTime,
+  currentOwnerName,
+  currentOwnerRole,
 }) => `
-You are an AI Ticket Audit Assistant. Analyze this Zoho Desk ticket for 360° agent performance using only the provided data.
-Evaluate follow-ups, tone, resolution quality, and how long the ticket stayed with each team/owner using the Owner Change Log.
+You are an AI Ticket Audit Assistant. Analyze this Zoho Desk ticket for 360° agent performance using ONLY the provided data.
+
+Business Hours (for SLA):
+- Timezone: Central (America/Chicago)
+- Business days: Monday–Friday
+- Business window: 08:00–18:00
+- Closed: Saturday, Sunday
+
+SLA Rules (business-hours aware):
+- First response within 30 minutes => within SLA; otherwise breach.
+- Resolution within 4 hours => within SLA; otherwise breach.
+Important: If a response/resolution occurs outside business hours, count time ONLY within business hours.
+
+Ticket timestamps (may be empty):
+- createdTime: ${createdTime || "(missing)"}
+- closedTime: ${closedTime || "(missing)"}
+- currentOwnerName: ${currentOwnerName || "(missing)"}
+- currentOwnerRole: ${currentOwnerRole || "(missing)"}
 
 IMPORTANT RULES FOR OWNER CHANGE LOG:
-- Use the Owner Change Log timestamps to calculate time spent per user and per role.
-- Never guess the time. Only calculate from the timestamps provided.
+- Use the Owner Change Log timestamps to calculate time spent per user and per role (do not guess).
+- Ignore system updates that do not change ownership.
+- Always round durations to nearest 0.5 hr.
+- Do not include customers/external users.
 
 IMPORTANT RULE — WHEN OWNER CHANGE LOG IS EMPTY:
-    • If the Owner Change Log is null, empty, or missing:
-         - The ticket stayed with the current owner for the FULL duration.
-         - The AI MUST CALCULATE that full duration using the  logic .
-               Example:
-                    full_duration = closedTime - createdTime
-                    OR
-                    full_duration = now() - createdTime
-         - Use the actual current owner name from ticket details.
-         - Use the actual current owner role (from Department or metadata).
+If Owner Change Log is null/empty/missing:
+- Ticket stayed with current owner for FULL duration.
+- FULL duration = (closedTime - createdTime) if closedTime exists else (now - createdTime).
+Return EXACTLY:
+"time_spent_per_user": "<Current Owner Name> – <full duration in hours>"
+"time_spent_per_role": "<Current Owner Role> – <full duration in hours>"
 
-    • Return EXACTLY:
-          "time_spent_per_user": "<Current Owner Name> – <calculated full duration in hours>",
-          "time_spent_per_role": "<Current Owner Role> – <calculated full duration in hours>"
-
-ADDITIONAL RULES:
-    • Always round duration to nearest 0.5 hr.
-    • Do not include customers or external users in this calculation.
-    • Ignore system updates that do not change ownership.
 1. FOLLOW-UP AUDIT:
-Check if the agent promised any callback/follow-up and whether it was completed.
-Classify as exactly one of:
+Classify as exactly one:
 - Follow-up Completed
 - Delayed Follow-up
 - Missed Follow-up
 - No Commitment Found
-Return as: "follow_up_status": "<one>"
 
 2. CATEGORY, SUBCATEGORY & ISSUE SUMMARY (STRICT):
-Use ONLY the Category → Subcategory → Issue Summary reference list below.
-Do not invent new names. Pick the closest best match.
+Use ONLY this list; do not invent names.
 Return:
-  "category": "<Category>",
-  "subcategory": "<Subcategory>",
-  "issue_summary": "<Issue Summary text for that exact category/subcategory>"
+"category", "subcategory", "issue_summary" (use the exact summary text from the list):
 
 REFERENCE LIST:
 ${REFERENCE_LIST}
 
-3. SCORING (0–5 each, integers):
-- Follow-Up Frequency
-- No Drops
-- SLA Adherence
-- Resolution Quality
-- Customer Sentiment (0–5, treat -10..+10 notes as 0..10)
-- Agent Tone
+3. SCORING (1–5 each, integers ONLY) — USE THIS FIXED RUBRIC EXACTLY:
 
-Also provide a short 1–2 sentence reason for *each* score:
-"score_reasons": {
-  "follow_up_frequency": "...",
-  "no_drops": "...",
-  "sla_adherence": "...",
-  "resolution_quality": "...",
-  "customer_sentiment": "...",
-  "agent_tone": "..."
-}
+A) FOLLOW-UP FREQUENCY (1–5)
+1 = No follow-up at all; customer kept waiting >48 hours.
+2 = Late follow-up; customer chased.
+3 = Follow-ups done but sometimes delayed.
+4 = Timely follow-ups, small delays only.
+5 = Proactive, consistent, timely follow-ups.
 
-4. FINAL AI TICKET SCORE (0–10 weighted):
-- Follow-Up 15%
-- No Drops 15%
-- SLA 20%
-- Resolution 20%
-- Sentiment 15%
-- Tone 15%
+B) NO DROPS (1–5)
+1 = Ticket dropped or unassigned for long.
+2 = Ownership gaps; stalled significantly.
+3 = Minor stalls; recovered.
+4 = Smooth handling with tiny gaps.
+5 = Perfect continuity; no delays.
 
-5. OWNER / TEAM TIME REMARK:
-From the Owner Change Log, estimate which owner/team handled the ticket the most and how the ownership moved.
-You DO NOT need exact hours. A brief summary like
-"Most time with VoIP Team, then briefly with Billing; finally closed by Chloe Finn"
-is enough.
-Return: "owner_time_summary": "<short remark>"
+C) SLA ADHERENCE (1–5) — Take BUSINESS HOURS into account.
+1 = First response >4h OR resolution >24h.
+2 = First response >1h AND resolution >6h.
+3 = First response 30–60m OR resolution 4–6h.
+4 = First response <30m, resolution slightly late.
+5 = Both within SLA comfortably.
+If timestamps are missing/unclear, choose 3 and state "insufficient timestamp detail".
 
-6. TIME SPENT PER USER (MULTILINE TEXT):
-Using the Owner Change Log, estimate time spent *per individual user/agent*.
-Return a multiline string like:
-"Mannat - 3 hrs
-Shikha - 2 hrs"
-Use whole hours or half-hours (e.g. 1.5 hrs) as approximate values.
-Return this as: "time_spent_per_user": "<multiline string>"
+D) RESOLUTION QUALITY (1–5)
+1 = Incorrect or unhelpful.
+2 = Partially correct but unclear.
+3 = Correct but missing clarity.
+4 = Clear and complete.
+5 = Exceptional clarity and proactive steps.
 
-7. TIME SPENT PER ROLE (MULTILINE TEXT):
-Using the Owner Change Log, estimate time spent *per role/team*.
-Return a multiline string like:
-"Escalation Manager - 1 hr
-Adit Pay - 2 hrs"
-(Use the role/team names as they appear or can be reasonably inferred.)
-Return this as: "time_spent_per_role": "<multiline string>"
+E) CUSTOMER SENTIMENT (1–5)
+1 = Very negative or escalated.
+2 = Negative or frustrated.
+3 = Neutral or unclear.
+4 = Positive or cooperative.
+5 = Very appreciative and satisfied.
 
+F) AGENT TONE (1–5)
+1 = Rude or unprofessional.
+2 = Mechanical and not empathetic.
+3 = Neutral and correct.
+4 = Warm and polite.
+5 = Highly empathetic and personalized.
 
-Return a single JSON object only, with keys:
+Provide 1–2 sentence reasons for each in "score_reasons".
+
+4. FINAL SCORE (1–100):
+Compute weighted score using:
+Follow-up 15%, No Drops 15%, SLA 20%, Resolution 20%, Sentiment 15%, Tone 15%.
+Convert each metric (1–5) to a 0–100 component:
+component = ((score - 1) / 4) * 100
+final_score = round(0.15*FU + 0.15*ND + 0.20*SLA + 0.20*RQ + 0.15*CS + 0.15*AT)
+
+5. OWNER/TIME SUMMARY:
+1 sentence about which team/owner had it longest.
+
+6. TIME SPENT PER USER (MULTILINE):
+Return multiline breakdown from owner log.
+
+7. TIME SPENT PER ROLE (MULTILINE):
+Return multiline breakdown from owner log.
+
+Return a single JSON object only:
 {
   "title": "Ticket Follow-up Analysis",
   "follow_up_status": "...",
@@ -513,12 +530,12 @@ Return a single JSON object only, with keys:
   "subcategory": "...",
   "issue_summary": "...",
   "scores": {
-    "follow_up_frequency": 0,
-    "no_drops": 0,
-    "sla_adherence": 0,
-    "resolution_quality": 0,
-    "customer_sentiment": 0,
-    "agent_tone": 0
+    "follow_up_frequency": 1,
+    "no_drops": 1,
+    "sla_adherence": 1,
+    "resolution_quality": 1,
+    "customer_sentiment": 1,
+    "agent_tone": 1
   },
   "score_reasons": {
     "follow_up_frequency": "...",
@@ -530,9 +547,9 @@ Return a single JSON object only, with keys:
   },
   "final_score": 0,
   "reasons": "one brief paragraph",
-  "owner_time_summary": "one short sentence about which team/owner had the ticket longest",
-  "time_spent_per_user": "Mannat - 3 hrs\\nShikha - 2 hrs",
-  "time_spent_per_role": "Escalation Manager - 1 hr\\nAdit Pay - 2 hrs"
+  "owner_time_summary": "one short sentence",
+  "time_spent_per_user": "Name - 1.5 hrs\\nName2 - 2 hrs",
+  "time_spent_per_role": "Role - 1.5 hrs\\nRole2 - 2 hrs"
 }
 
 Ticket:
@@ -550,6 +567,8 @@ ${ownerChangeLog || "(none)"}
 
 // ------------ OpenAI caller ------------
 async function callOpenAI(prompt) {
+  if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY missing");
+
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -561,11 +580,7 @@ async function callOpenAI(prompt) {
       response_format: { type: "json_object" },
       temperature: 0.2,
       messages: [
-        {
-          role: "system",
-          content:
-            "Only output valid JSON that matches the requested schema. Do not include markdown.",
-        },
+        { role: "system", content: "Only output valid JSON. No markdown." },
         { role: "user", content: prompt },
       ],
     }),
@@ -580,19 +595,54 @@ async function callOpenAI(prompt) {
   return JSON.parse(data.choices[0].message.content);
 }
 
-// ------------ Map AI follow-up to Zoho picklist ------------
+// ------------ Follow-up mapping ------------
 function normalizeFollowUpStatus(raw) {
-  if (!raw) return null;
+  if (!raw) return "No Commitment Found";
   const s = raw.toString().toLowerCase();
-
   if (s.includes("completed")) return "Follow-up Completed";
-  if (s.includes("delayed"))   return "Delayed Follow-up";
-  if (s.includes("missed"))    return "Missed Follow-up";
+  if (s.includes("delayed")) return "Delayed Follow-up";
+  if (s.includes("missed")) return "Missed Follow-up";
   if (s.includes("no follow-up required") || s.includes("no commitment"))
     return "No Follow-up Required";
-
   return "No Commitment Found";
 }
+
+// ------------ Final score (compute in Node for reliability) ------------
+function clamp15(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 3;
+  return Math.max(1, Math.min(5, Math.round(n)));
+}
+function toPct1to5(score) {
+  const s = clamp15(score);
+  return ((s - 1) / 4) * 100;
+}
+function computeFinalScore(scores = {}) {
+  const FU = toPct1to5(scores.follow_up_frequency);
+  const ND = toPct1to5(scores.no_drops);
+  const SLA = toPct1to5(scores.sla_adherence);
+  const RQ = toPct1to5(scores.resolution_quality);
+  const CS = toPct1to5(scores.customer_sentiment);
+  const AT = toPct1to5(scores.agent_tone);
+
+  return Math.round(
+    0.15 * FU +
+      0.15 * ND +
+      0.2 * SLA +
+      0.2 * RQ +
+      0.15 * CS +
+      0.15 * AT
+  );
+}
+
+// ------------ (Optional) business-hours helper (for future use) ------------
+function parseDateSafe(ts) {
+  if (!ts) return null;
+  const d = new Date(ts);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+// NOTE: Full business-hours elapsed computation can be added if you later want
+// to compute SLA durations in Node rather than letting the LLM infer from logs.
 
 // ------------ Update Zoho Desk ticket ------------
 async function updateDeskTicket(ticketId, aiResult) {
@@ -601,71 +651,79 @@ async function updateDeskTicket(ticketId, aiResult) {
     return { skipped: true };
   }
 
-  const scores         = aiResult.scores || {};
-  const scoreReasons   = aiResult.score_reasons || {};
+  const scores = aiResult.scores || {};
+  // normalize and enforce valid ints 1..5
+  const normalizedScores = {
+    follow_up_frequency: clamp15(scores.follow_up_frequency),
+    no_drops: clamp15(scores.no_drops),
+    sla_adherence: clamp15(scores.sla_adherence),
+    resolution_quality: clamp15(scores.resolution_quality),
+    customer_sentiment: clamp15(scores.customer_sentiment),
+    agent_tone: clamp15(scores.agent_tone),
+  };
+
+  const scoreReasons = aiResult.score_reasons || {};
   const followUpStatus = normalizeFollowUpStatus(aiResult.follow_up_status);
 
   const ownerTimeRemark = aiResult.owner_time_summary || "";
-  const aiMainSummary   = aiResult.reasons || "";
+  const aiMainSummary = aiResult.reasons || "";
   const timeSpentPerUser = aiResult.time_spent_per_user || "";
   const timeSpentPerRole = aiResult.time_spent_per_role || "";
-  const issueSummary     = aiResult.issue_summary || "";
+  const issueSummary = aiResult.issue_summary || "";
 
-  const briefSummary = aiMainSummary;
+  const finalScore100 = computeFinalScore(normalizedScores);
+  aiResult.final_score = finalScore100;
 
   // ---- custom fields by LABEL (Zoho Desk UI labels) ----
   const customFields = {
     "Follow-up Status": followUpStatus,
     "AI Category": aiResult.category || "",
     "AI Sub Category": aiResult.subcategory || "",
-    "AI Final Score": aiResult.final_score ?? null,
-    "AI Category explanation": briefSummary, // "Brief AI Summary"
+    "AI Final Score": finalScore100, // 0–100
+    "AI Category explanation": aiMainSummary,
 
-    "Follow-Up Frequency": scores.follow_up_frequency ?? null,
-    "No Drops Score":       scores.no_drops ?? null,
-    "SLA Adherence":        scores.sla_adherence ?? null,
-    "Resolution Quality":   scores.resolution_quality ?? null,
-    "Customer Sentiment":   scores.customer_sentiment ?? null,
-    "Agent Tone":           scores.agent_tone ?? null,
+    "Follow-Up Frequency": normalizedScores.follow_up_frequency,
+    "No Drops Score": normalizedScores.no_drops,
+    "SLA Adherence": normalizedScores.sla_adherence,
+    "Resolution Quality": normalizedScores.resolution_quality,
+    "Customer Sentiment": normalizedScores.customer_sentiment,
+    "Agent Tone": normalizedScores.agent_tone,
 
-    "Reason Follow-Up Frequency":  scoreReasons.follow_up_frequency || "",
-    "Reason No Drops":             scoreReasons.no_drops || "",
-    "Reasons SLA Adherence":       scoreReasons.sla_adherence || "",
-    "Reason Resolution Quality":   scoreReasons.resolution_quality || "",
-    "Reason Customer Sentiment":   scoreReasons.customer_sentiment || "",
-    "Reason Agent Tone":           scoreReasons.agent_tone || "",
+    "Reason Follow-Up Frequency": scoreReasons.follow_up_frequency || "",
+    "Reason No Drops": scoreReasons.no_drops || "",
+    "Reasons SLA Adherence": scoreReasons.sla_adherence || "",
+    "Reason Resolution Quality": scoreReasons.resolution_quality || "",
+    "Reason Customer Sentiment": scoreReasons.customer_sentiment || "",
+    "Reason Agent Tone": scoreReasons.agent_tone || "",
 
     "Remarks-OC Log": ownerTimeRemark,
 
-    // NEW labels in Desk (create as Multi-line fields)
+    // multi-line fields (create in Zoho Desk)
     "Time Spent Per User": timeSpentPerUser,
     "Time Spent Per Role": timeSpentPerRole,
-    "Issue Summary":       issueSummary,
+    "Issue Summary": issueSummary,
   };
 
   // ---- custom fields by API NAME ----
+  // IMPORTANT: Replace these cf_* API names with your actual Zoho Desk custom field API names.
   const body = {
     customFields,
     cf: {
-      // Brief AI Summary
-      cf_ai_category_explanation: briefSummary,
-
-      // Remarks-OC Log
+      cf_ai_category_explanation: aiMainSummary,
       cf_remarks_oc_log: ownerTimeRemark,
-
-      // If you still use this older field for remarks:
       cf_ts_resolution: ownerTimeRemark,
 
-      // Time spent fields (adjust to your real API names)
+      // multiline (adjust)
       cf_csm_resolution: timeSpentPerUser,
       cf_voip_resolution: timeSpentPerRole,
-
-      // Issue summary field (set its API name here)
       cf_tech_csm_resolution: issueSummary,
+
+      // final score (adjust if you store separately)
+      // cf_ai_final_score: finalScore100,
     },
   };
 
-  console.log("Desk update payload:", JSON.stringify(body).slice(0, 700));
+  console.log("Desk update payload:", JSON.stringify(body).slice(0, 900));
 
   const r = await fetch(`https://desk.zoho.com/api/v1/tickets/${ticketId}`, {
     method: "PATCH",
@@ -678,8 +736,7 @@ async function updateDeskTicket(ticketId, aiResult) {
   });
 
   const data = await r.json().catch(() => ({}));
-  console.log("Desk update response:", JSON.stringify(data).slice(0, 1200));
-
+  console.log("Desk update response:", r.status, JSON.stringify(data).slice(0, 1200));
   return { status: r.status, data };
 }
 
@@ -697,6 +754,7 @@ app.post("/desk-webhook", async (req, res) => {
     }
 
     const body = req.body || {};
+
     const {
       ticket_id,
       subject = "N/A",
@@ -706,12 +764,14 @@ app.post("/desk-webhook", async (req, res) => {
       department = "N/A",
       conversation = "",
       owner_change_log = "",
+      // OPTIONAL fields if you can include them from your webhook payload:
+      createdTime = "",
+      closedTime = "",
+      currentOwnerName = "",
+      currentOwnerRole = "",
     } = body;
 
-    console.log(
-      "Webhook hit:",
-      JSON.stringify({ ticket_id, subject }).slice(0, 300)
-    );
+    console.log("Webhook hit:", JSON.stringify({ ticket_id, subject }).slice(0, 400));
 
     const prompt = PROMPT({
       subject,
@@ -721,9 +781,16 @@ app.post("/desk-webhook", async (req, res) => {
       department,
       conversation,
       ownerChangeLog: owner_change_log,
+      createdTime,
+      closedTime,
+      currentOwnerName,
+      currentOwnerRole,
     });
 
     const ai = await callOpenAI(prompt);
+
+    // Ensure final_score is computed as 0–100 in Node
+    ai.final_score = computeFinalScore(ai.scores || {});
 
     let deskResult = { skipped: true };
     if (ticket_id) {
@@ -735,9 +802,7 @@ app.post("/desk-webhook", async (req, res) => {
     return res.json({ ok: true, ai, desk: deskResult });
   } catch (err) {
     console.error("Webhook error:", err);
-    return res
-      .status(500)
-      .json({ ok: false, error: err.message || "Unknown error" });
+    return res.status(500).json({ ok: false, error: err.message || "Unknown error" });
   }
 });
 
