@@ -3,8 +3,6 @@ import express from "express";
 import crypto from "crypto";
 
 // Node 18+ has global fetch.
-// If you are on an older Node, install node-fetch and uncomment:
-// import fetch from "node-fetch";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -14,13 +12,6 @@ const DESK_SHARED_SECRET = process.env.DESK_SHARED_SECRET;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ZOHO_ORG_ID = process.env.ZOHO_ORG_ID;
 const ZOHO_OAUTH_TOKEN = process.env.ZOHO_OAUTH_TOKEN;
-
-// ------------ BUSINESS HOURS (CST / Central Standard Time) ------------
-// From your screenshot: Mon-Fri 08:00 AM - 06:00 PM CST. Closed Sat/Sun.
-const BUSINESS_TZ = "America/Chicago";
-const BUSINESS_DAYS = [1, 2, 3, 4, 5]; // Mon..Fri (JS getDay(): Sun=0)
-const BUSINESS_START_MIN = 8 * 60; // 08:00
-const BUSINESS_END_MIN = 18 * 60; // 18:00
 
 // ------------ CATEGORY / SUBCATEGORY / ISSUE SUMMARY (COMPACT) ------------
 const REFERENCE_LIST = `
@@ -413,122 +404,101 @@ const PROMPT = ({
 }) => `
 You are an AI Ticket Audit Assistant. Analyze this Zoho Desk ticket for 360° agent performance using ONLY the provided data.
 
-Business Hours (for SLA):
-- Timezone: Central (America/Chicago)
-- Business days: Monday–Friday
-- Business window: 08:00–18:00
-- Closed: Saturday, Sunday
+Scoring Rubric:
+1) FOLLOW-UP FREQUENCY (1–5)
+1 No follow-up; customer waited >48h
+2 Late follow-up; customer chased
+3 Follow-ups but sometimes delayed
+4 Timely follow-ups; small delays
+5 Proactive; consistent; timely
 
-SLA Rules (business-hours aware):
-- First response within 30 minutes => within SLA; otherwise breach.
-- Resolution within 4 hours => within SLA; otherwise breach.
-Important: If a response/resolution occurs outside business hours, count time ONLY within business hours.
+2) NO DROPS (1–5)
+1 Dropped/unassigned long
+2 Ownership gaps; stalled
+3 Minor stalls; recovered
+4 Smooth; tiny gaps
+5 Perfect continuity
 
-Ticket timestamps (may be empty):
-- createdTime: ${createdTime || "(missing)"}
-- closedTime: ${closedTime || "(missing)"}
-- currentOwnerName: ${currentOwnerName || "(missing)"}
-- currentOwnerRole: ${currentOwnerRole || "(missing)"}
+3) SLA ADHERENCE (1–5) (business hours aware)
+1 First response >4h OR resolution >24h
+2 First response >1h AND resolution >6h
+3 First response 30–60m OR resolution 4–6h
+4 First response <30m, resolution slightly late
+5 Both within SLA comfortably
+If timestamps missing/unclear => score 3 and note insufficient timestamps.
 
-IMPORTANT RULES FOR OWNER CHANGE LOG:
-- Use the Owner Change Log timestamps to calculate time spent per user and per role (do not guess).
-- Ignore system updates that do not change ownership.
-- Always round durations to nearest 0.5 hr.
-- Do not include customers/external users.
+4) RESOLUTION QUALITY (1–5)
+1 Incorrect/unhelpful
+2 Partially correct, unclear
+3 Correct, missing clarity
+4 Clear and complete
+5 Exceptional clarity + proactive
 
-IMPORTANT RULE — WHEN OWNER CHANGE LOG IS EMPTY:
-If Owner Change Log is null/empty/missing:
-- Ticket stayed with current owner for FULL duration.
-- FULL duration = (closedTime - createdTime) if closedTime exists else (now - createdTime).
-Return EXACTLY:
-"time_spent_per_user": "<Current Owner Name> – <full duration in hours>"
-"time_spent_per_role": "<Current Owner Role> – <full duration in hours>"
+5) CUSTOMER SENTIMENT (1–5)
+1 Very negative/escalated
+2 Negative/frustrated
+3 Neutral/unclear
+4 Positive/cooperative
+5 Very appreciative
 
-1. FOLLOW-UP AUDIT:
-Classify as exactly one:
-- Follow-up Completed
-- Delayed Follow-up
-- Missed Follow-up
-- No Commitment Found
+6) AGENT TONE (1–5)
+1 Rude/unprofessional
+2 Mechanical/not empathetic
+3 Neutral/correct
+4 Warm/polite
+5 Highly empathetic/personalized
 
-2. CATEGORY, SUBCATEGORY & ISSUE SUMMARY (STRICT):
-Use ONLY this list; do not invent names.
-Return:
-"category", "subcategory", "issue_summary" (use the exact summary text from the list):
+IMPORTANT: Applicability Rules (exclude metrics from final score when not relevant)
+A) Follow-up not applicable:
+- If the ticket is a “single-thread / single-touch” ticket (one customer message and one agent response, OR only a single agent response and no continued back-and-forth)
+AND
+- No promised callback/follow-up was needed (no commitment found / no follow-up required)
+THEN:
+- Set "applicability.follow_up_frequency" = false
+- Set scores.follow_up_frequency = null
+- Set score_reasons.follow_up_frequency = "Not applicable (single-thread ticket; no follow-up required)."
+
+B) No Drops not applicable:
+- If the ticket is “single-touch” with no meaningful handoffs/gaps (e.g., no owner changes OR only one owner the entire time)
+THEN:
+- Set "applicability.no_drops" = false
+- Set scores.no_drops = null
+- Set score_reasons.no_drops = "Not applicable (single-touch ticket; no handoffs/gaps to evaluate)."
+
+Final Score (1–100):
+- Use weights: Follow-up 15%, No Drops 15%, SLA 20%, Resolution 20%, Sentiment 15%, Tone 15%
+- BUT if a metric is not applicable, EXCLUDE it and RENORMALIZE remaining weights to sum to 100%.
+- Convert 1–5 to 0–100 component as: ((score-1)/4)*100
+- final_score = round(sum(component * adjusted_weight))
+
+Category/Subcategory selection MUST use exact labels from Reference List.
 
 REFERENCE LIST:
 ${REFERENCE_LIST}
 
-3. SCORING (1–5 each, integers ONLY) — USE THIS FIXED RUBRIC EXACTLY:
+Owner Change Log rule:
+- Use owner change timestamps only (no guessing), round to nearest 0.5 hr.
+- Ignore system updates that do not change ownership.
+- If Owner Change Log empty/missing: treat current owner as holding full duration
+  (closedTime-createdTime else now-createdTime).
 
-A) FOLLOW-UP FREQUENCY (1–5)
-1 = No follow-up at all; customer kept waiting >48 hours.
-2 = Late follow-up; customer chased.
-3 = Follow-ups done but sometimes delayed.
-4 = Timely follow-ups, small delays only.
-5 = Proactive, consistent, timely follow-ups.
-
-B) NO DROPS (1–5)
-1 = Ticket dropped or unassigned for long.
-2 = Ownership gaps; stalled significantly.
-3 = Minor stalls; recovered.
-4 = Smooth handling with tiny gaps.
-5 = Perfect continuity; no delays.
-
-C) SLA ADHERENCE (1–5) — Take BUSINESS HOURS into account.
-1 = First response >4h OR resolution >24h.
-2 = First response >1h AND resolution >6h.
-3 = First response 30–60m OR resolution 4–6h.
-4 = First response <30m, resolution slightly late.
-5 = Both within SLA comfortably.
-If timestamps are missing/unclear, choose 3 and state "insufficient timestamp detail".
-
-D) RESOLUTION QUALITY (1–5)
-1 = Incorrect or unhelpful.
-2 = Partially correct but unclear.
-3 = Correct but missing clarity.
-4 = Clear and complete.
-5 = Exceptional clarity and proactive steps.
-
-E) CUSTOMER SENTIMENT (1–5)
-1 = Very negative or escalated.
-2 = Negative or frustrated.
-3 = Neutral or unclear.
-4 = Positive or cooperative.
-5 = Very appreciative and satisfied.
-
-F) AGENT TONE (1–5)
-1 = Rude or unprofessional.
-2 = Mechanical and not empathetic.
-3 = Neutral and correct.
-4 = Warm and polite.
-5 = Highly empathetic and personalized.
-
-Provide 1–2 sentence reasons for each in "score_reasons".
-
-4. FINAL SCORE (1–100):
-Compute weighted score using:
-Follow-up 15%, No Drops 15%, SLA 20%, Resolution 20%, Sentiment 15%, Tone 15%.
-Convert each metric (1–5) to a 0–100 component:
-component = ((score - 1) / 4) * 100
-final_score = round(0.15*FU + 0.15*ND + 0.20*SLA + 0.20*RQ + 0.15*CS + 0.15*AT)
-
-5. OWNER/TIME SUMMARY:
-1 sentence about which team/owner had it longest.
-
-6. TIME SPENT PER USER (MULTILINE):
-Return multiline breakdown from owner log.
-
-7. TIME SPENT PER ROLE (MULTILINE):
-Return multiline breakdown from owner log.
+Ticket timestamps (may be empty):
+createdTime: ${createdTime || "(missing)"}
+closedTime: ${closedTime || "(missing)"}
+currentOwnerName: ${currentOwnerName || "(missing)"}
+currentOwnerRole: ${currentOwnerRole || "(missing)"}
 
 Return a single JSON object only:
 {
   "title": "Ticket Follow-up Analysis",
-  "follow_up_status": "...",
+  "follow_up_status": "Follow-up Completed|Delayed Follow-up|Missed Follow-up|No Commitment Found",
   "category": "...",
   "subcategory": "...",
   "issue_summary": "...",
+  "applicability": {
+    "follow_up_frequency": true,
+    "no_drops": true
+  },
   "scores": {
     "follow_up_frequency": 1,
     "no_drops": 1,
@@ -602,47 +572,52 @@ function normalizeFollowUpStatus(raw) {
   if (s.includes("completed")) return "Follow-up Completed";
   if (s.includes("delayed")) return "Delayed Follow-up";
   if (s.includes("missed")) return "Missed Follow-up";
-  if (s.includes("no follow-up required") || s.includes("no commitment"))
-    return "No Follow-up Required";
   return "No Commitment Found";
 }
 
-// ------------ Final score (compute in Node for reliability) ------------
-function clamp15(v) {
+// ------------ Scoring helpers ------------
+function to15OrNull(v) {
+  if (v === null || v === undefined) return null;
   const n = Number(v);
-  if (!Number.isFinite(n)) return 3;
-  return Math.max(1, Math.min(5, Math.round(n)));
+  if (!Number.isFinite(n)) return null;
+  const rounded = Math.round(n);
+  if (rounded < 1) return 1;
+  if (rounded > 5) return 5;
+  return rounded;
 }
-function toPct1to5(score) {
-  const s = clamp15(score);
+function scoreToPct(score1to5) {
+  // score is 1..5 => 0..100
+  const s = to15OrNull(score1to5);
+  if (s === null) return null;
   return ((s - 1) / 4) * 100;
 }
-function computeFinalScore(scores = {}) {
-  const FU = toPct1to5(scores.follow_up_frequency);
-  const ND = toPct1to5(scores.no_drops);
-  const SLA = toPct1to5(scores.sla_adherence);
-  const RQ = toPct1to5(scores.resolution_quality);
-  const CS = toPct1to5(scores.customer_sentiment);
-  const AT = toPct1to5(scores.agent_tone);
+function computeFinalScoreDynamic(scores = {}, applicability = {}) {
+  // base weights (sum 1.0)
+  const base = [
+    ["follow_up_frequency", 0.15, applicability.follow_up_frequency !== false],
+    ["no_drops", 0.15, applicability.no_drops !== false],
+    ["sla_adherence", 0.2, true],
+    ["resolution_quality", 0.2, true],
+    ["customer_sentiment", 0.15, true],
+    ["agent_tone", 0.15, true],
+  ];
 
-  return Math.round(
-    0.15 * FU +
-      0.15 * ND +
-      0.2 * SLA +
-      0.2 * RQ +
-      0.15 * CS +
-      0.15 * AT
-  );
-}
+  // filter to applicable + score present
+  const kept = base
+    .map(([k, w, app]) => {
+      const pct = scoreToPct(scores[k]);
+      return { k, w, app, pct };
+    })
+    .filter((x) => x.app && x.pct !== null);
 
-// ------------ (Optional) business-hours helper (for future use) ------------
-function parseDateSafe(ts) {
-  if (!ts) return null;
-  const d = new Date(ts);
-  return Number.isFinite(d.getTime()) ? d : null;
+  if (kept.length === 0) return 0;
+
+  const wsum = kept.reduce((a, x) => a + x.w, 0);
+  const normalized = kept.map((x) => ({ ...x, w: x.w / wsum }));
+
+  const final = normalized.reduce((a, x) => a + x.pct * x.w, 0);
+  return Math.round(final);
 }
-// NOTE: Full business-hours elapsed computation can be added if you later want
-// to compute SLA durations in Node rather than letting the LLM infer from logs.
 
 // ------------ Update Zoho Desk ticket ------------
 async function updateDeskTicket(ticketId, aiResult) {
@@ -651,35 +626,52 @@ async function updateDeskTicket(ticketId, aiResult) {
     return { skipped: true };
   }
 
+  const applicability = aiResult.applicability || {};
   const scores = aiResult.scores || {};
-  // normalize and enforce valid ints 1..5
+  const scoreReasons = aiResult.score_reasons || {};
+
+  // Normalize: allow nulls for not applicable
   const normalizedScores = {
-    follow_up_frequency: clamp15(scores.follow_up_frequency),
-    no_drops: clamp15(scores.no_drops),
-    sla_adherence: clamp15(scores.sla_adherence),
-    resolution_quality: clamp15(scores.resolution_quality),
-    customer_sentiment: clamp15(scores.customer_sentiment),
-    agent_tone: clamp15(scores.agent_tone),
+    follow_up_frequency: to15OrNull(scores.follow_up_frequency),
+    no_drops: to15OrNull(scores.no_drops),
+    sla_adherence: to15OrNull(scores.sla_adherence) ?? 3,
+    resolution_quality: to15OrNull(scores.resolution_quality) ?? 3,
+    customer_sentiment: to15OrNull(scores.customer_sentiment) ?? 3,
+    agent_tone: to15OrNull(scores.agent_tone) ?? 3,
   };
 
-  const scoreReasons = aiResult.score_reasons || {};
-  const followUpStatus = normalizeFollowUpStatus(aiResult.follow_up_status);
+  // Force N/A behavior when applicability says false
+  if (applicability.follow_up_frequency === false) {
+    normalizedScores.follow_up_frequency = null;
+    scoreReasons.follow_up_frequency =
+      scoreReasons.follow_up_frequency ||
+      "Not applicable (single-thread ticket; no follow-up required).";
+  }
+  if (applicability.no_drops === false) {
+    normalizedScores.no_drops = null;
+    scoreReasons.no_drops =
+      scoreReasons.no_drops ||
+      "Not applicable (single-touch ticket; no handoffs/gaps to evaluate).";
+  }
 
+  // Compute final 1–100 dynamically (excluding N/A)
+  const finalScore100 = computeFinalScoreDynamic(normalizedScores, applicability);
+  aiResult.final_score = finalScore100;
+
+  const followUpStatus = normalizeFollowUpStatus(aiResult.follow_up_status);
   const ownerTimeRemark = aiResult.owner_time_summary || "";
   const aiMainSummary = aiResult.reasons || "";
   const timeSpentPerUser = aiResult.time_spent_per_user || "";
   const timeSpentPerRole = aiResult.time_spent_per_role || "";
   const issueSummary = aiResult.issue_summary || "";
 
-  const finalScore100 = computeFinalScore(normalizedScores);
-  aiResult.final_score = finalScore100;
-
   // ---- custom fields by LABEL (Zoho Desk UI labels) ----
+  // If your Zoho fields do NOT accept null, change null to 0 or "" as needed.
   const customFields = {
     "Follow-up Status": followUpStatus,
     "AI Category": aiResult.category || "",
     "AI Sub Category": aiResult.subcategory || "",
-    "AI Final Score": finalScore100, // 0–100
+    "AI Final Score": finalScore100,
     "AI Category explanation": aiMainSummary,
 
     "Follow-Up Frequency": normalizedScores.follow_up_frequency,
@@ -697,29 +689,21 @@ async function updateDeskTicket(ticketId, aiResult) {
     "Reason Agent Tone": scoreReasons.agent_tone || "",
 
     "Remarks-OC Log": ownerTimeRemark,
-
-    // multi-line fields (create in Zoho Desk)
     "Time Spent Per User": timeSpentPerUser,
     "Time Spent Per Role": timeSpentPerRole,
     "Issue Summary": issueSummary,
   };
 
-  // ---- custom fields by API NAME ----
-  // IMPORTANT: Replace these cf_* API names with your actual Zoho Desk custom field API names.
   const body = {
     customFields,
     cf: {
+      // Replace with your real API names if you use them
       cf_ai_category_explanation: aiMainSummary,
       cf_remarks_oc_log: ownerTimeRemark,
       cf_ts_resolution: ownerTimeRemark,
-
-      // multiline (adjust)
       cf_csm_resolution: timeSpentPerUser,
       cf_voip_resolution: timeSpentPerRole,
       cf_tech_csm_resolution: issueSummary,
-
-      // final score (adjust if you store separately)
-      // cf_ai_final_score: finalScore100,
     },
   };
 
@@ -741,9 +725,7 @@ async function updateDeskTicket(ticketId, aiResult) {
 }
 
 // ------------ Health check ------------
-app.get("/", (_req, res) => {
-  res.send("✅ Railway app is live!");
-});
+app.get("/", (_req, res) => res.send("✅ Railway app is live!"));
 
 // ------------ Webhook ------------
 app.post("/desk-webhook", async (req, res) => {
@@ -754,7 +736,6 @@ app.post("/desk-webhook", async (req, res) => {
     }
 
     const body = req.body || {};
-
     const {
       ticket_id,
       subject = "N/A",
@@ -764,7 +745,8 @@ app.post("/desk-webhook", async (req, res) => {
       department = "N/A",
       conversation = "",
       owner_change_log = "",
-      // OPTIONAL fields if you can include them from your webhook payload:
+
+      // OPTIONAL: include these in your webhook payload if possible
       createdTime = "",
       closedTime = "",
       currentOwnerName = "",
@@ -789,15 +771,12 @@ app.post("/desk-webhook", async (req, res) => {
 
     const ai = await callOpenAI(prompt);
 
-    // Ensure final_score is computed as 0–100 in Node
-    ai.final_score = computeFinalScore(ai.scores || {});
+    // Recompute final score in Node (exclude N/A reliably)
+    ai.final_score = computeFinalScoreDynamic(ai.scores || {}, ai.applicability || {});
 
     let deskResult = { skipped: true };
-    if (ticket_id) {
-      deskResult = await updateDeskTicket(ticket_id, ai);
-    } else {
-      console.warn("No ticket_id in payload; skipping Desk update.");
-    }
+    if (ticket_id) deskResult = await updateDeskTicket(ticket_id, ai);
+    else console.warn("No ticket_id in payload; skipping Desk update.");
 
     return res.json({ ok: true, ai, desk: deskResult });
   } catch (err) {
@@ -808,6 +787,4 @@ app.post("/desk-webhook", async (req, res) => {
 
 // ------------ Start server ------------
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
-});
+app.listen(PORT, () => console.log("Server running on port", PORT));
