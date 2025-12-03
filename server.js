@@ -712,7 +712,7 @@ async function updateDeskTicket(ticketId, aiResult) {
   const r = await fetch(`https://desk.zoho.com/api/v1/tickets/${ticketId}`, {
     method: "PATCH",
     headers: {
-      Authorization: `Zoho-oauthtoken ${ZOHO_OAUTH_TOKEN}`,
+      Authorization: `Zoho-oauthtoken ${DESK_OAUTH_TOKEN}`,
       orgId: ZOHO_ORG_ID,
       "Content-Type": "application/json",
     },
