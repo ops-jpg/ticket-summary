@@ -11,7 +11,7 @@ app.use(express.json({ limit: "2mb" }));
 const DESK_SHARED_SECRET = process.env.DESK_SHARED_SECRET;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ZOHO_ORG_ID = process.env.ZOHO_ORG_ID;
-const ZOHO_OAUTH_TOKEN = process.env.ZOHO_OAUTH_TOKEN;
+const DESK_OAUTH_TOKEN = process.env.DESK_OAUTH_TOKEN;
 
 // ------------ CATEGORY / SUBCATEGORY / ISSUE SUMMARY (COMPACT) ------------
 const REFERENCE_LIST = `
@@ -621,8 +621,8 @@ function computeFinalScoreDynamic(scores = {}, applicability = {}) {
 
 // ------------ Update Zoho Desk ticket ------------
 async function updateDeskTicket(ticketId, aiResult) {
-  if (!ZOHO_OAUTH_TOKEN || !ZOHO_ORG_ID) {
-    console.warn("ZOHO_OAUTH_TOKEN or ZOHO_ORG_ID missing; skipping Desk update.");
+  if (!DESK_OAUTH_TOKEN || !ZOHO_ORG_ID) {
+    console.warn("DESK_OAUTH_TOKEN or ZOHO_ORG_ID missing; skipping Desk update.");
     return { skipped: true };
   }
 
