@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 
 // ------------ ENV VARS ------------
-const DESK_SHARED_SECRET = process.env.DESK_SHARED_SECRET;
+const DESK_SHARED_SECRET = process.env.DESK_SHARED_SECRET; // header: desk-shared-secret
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const ZOHO_ORG_ID = process.env.ZOHO_ORG_ID;
@@ -23,29 +23,7 @@ const ZOHO_ACCOUNTS_DOMAIN =
 // If Zoho numeric fields reject null, set NA_NUMERIC_STRATEGY=zero
 const NA_NUMERIC_STRATEGY = (process.env.NA_NUMERIC_STRATEGY || "null").toLowerCase(); // "null" | "zero"
 
-// ------------ TOKEN CACHE ------------
-let cachedAccessToken = DESK_OAUTH_TOKEN || null;
-let cachedAccessTokenExpiresAtMs = 0; // if unknown, 0
-
-function setCachedToken(token, expiresInSec) {
-  cachedAccessToken = token;
-  DESK_OAUTH_TOKEN = token;
-  if (Number.isFinite(expiresInSec) && expiresInSec > 0) {
-    // buffer 60s
-    cachedAccessTokenExpiresAtMs = Date.now() + Math.max(0, (expiresInSec - 60)) * 1000;
-  } else {
-    cachedAccessTokenExpiresAtMs = 0;
-  }
-}
-
-function getCachedTokenIfValid() {
-  if (!cachedAccessToken) return null;
-  if (cachedAccessTokenExpiresAtMs === 0) return cachedAccessToken; // unknown expiry; try it
-  if (Date.now() < cachedAccessTokenExpiresAtMs) return cachedAccessToken;
-  return null;
-}
-
-// ------------ CATEGORY / SUBCATEGORY / ISSUE SUMMARY (COMPACT) ------------
+// ------------ CATEGORY / SUBCATEGORY / ISSUE SUMMARY (COMPACT, EQUIVALENT) ------------
 const REFERENCE_LIST = `
 OS Issue:
 - Mapping: OS mapping mismatch vs EHR
@@ -433,62 +411,70 @@ const PROMPT = ({
   closedTime,
   currentOwnerName,
   currentOwnerRole,
+  threadCount,
 }) => `
 You are an AI Ticket Audit Assistant. Analyze this Zoho Desk ticket for agent performance using ONLY the provided ticket data.
 
-You MUST evaluate applicability first:
-- Determine if ticket is "single-thread/single-touch" (minimal back-and-forth).
-- If single-touch AND no follow-up was needed, Follow-up metric is NOT applicable.
-- If single-touch AND no handoffs/gaps exist, No Drops metric is NOT applicable.
+STEP 0 — Determine applicability (VERY IMPORTANT):
+A) FOLLOW-UP FREQUENCY applicability:
+- If the ticket is single-touch/single-thread AND no follow-up was needed, set applicability.follow_up_frequency=false.
+- In that case set scores.follow_up_frequency to 0 and set score_reasons.follow_up_frequency to "Not applicable (no follow-up required)."
 
-Rubric (score 1–5 integers):
-1) FOLLOW-UP FREQUENCY
-1 No follow-up; customer waited >48h
-2 Late follow-up; customer chased
-3 Follow-ups but sometimes delayed
-4 Timely follow-ups; small delays
-5 Proactive; consistent; timely
+B) NO DROPS applicability:
+- If the ticket is single-touch/single-thread AND there were no handoffs and no meaningful gaps to evaluate, set applicability.no_drops=false.
+- In that case set scores.no_drops to 0 and set score_reasons.no_drops to "Not applicable (no handoffs/gaps to evaluate)."
 
-2) NO DROPS
-1 Dropped/unassigned long
-2 Ownership gaps; stalled
-3 Minor stalls; recovered
-4 Smooth; tiny gaps
-5 Perfect continuity
+You MUST still score all the other metrics.
 
-3) SLA ADHERENCE (business hours aware; use timestamps if present; otherwise score 3 and say timestamps insufficient)
-1 First response >4h OR resolution >24h
-2 First response >1h AND resolution >6h
-3 First response 30–60m OR resolution 4–6h OR timestamps unclear
-4 First response <30m, resolution slightly late
-5 Both within SLA comfortably
+SCORING RUBRIC (score 1–5 integers only; 0 ONLY allowed when metric is Not applicable):
+1) FOLLOW-UP FREQUENCY (1–5)
+1 = No follow-up at all; customer kept waiting >48 hours.
+2 = Late follow-up; customer chased.
+3 = Follow-ups done but sometimes delayed.
+4 = Timely follow-ups, small delays only.
+5 = Proactive, consistent, timely follow-ups.
 
-4) RESOLUTION QUALITY
-1 Incorrect/unhelpful
-2 Partially correct, unclear
-3 Correct, missing clarity
-4 Clear and complete
-5 Exceptional clarity + proactive
+2) NO DROPS (1–5)
+1 = Ticket dropped or unassigned for long.
+2 = Ownership gaps; stalled significantly.
+3 = Minor stalls; recovered.
+4 = Smooth handling with tiny gaps.
+5 = Perfect continuity; no delays.
 
-5) CUSTOMER SENTIMENT
-1 Very negative/escalated
-2 Negative/frustrated
-3 Neutral/unclear
-4 Positive/cooperative
-5 Very appreciative
+3) SLA ADHERENCE (1–5)
+Take business hours into account.
+If timestamps are insufficient/unclear, score 3 and say "insufficient timestamps".
+1 = First response >4h OR resolution >24h.
+2 = First response >1h AND resolution >6h.
+3 = First response 30–60m OR resolution 4–6h OR timestamps unclear.
+4 = First response <30m, resolution slightly late.
+5 = Both within SLA comfortably.
 
-6) AGENT TONE
-1 Rude/unprofessional
-2 Mechanical/not empathetic
-3 Neutral/correct
-4 Warm/polite
-5 Highly empathetic/personalized
+4) RESOLUTION QUALITY (1–5)
+1 = Incorrect or unhelpful.
+2 = Partially correct but unclear.
+3 = Correct but missing clarity.
+4 = Clear and complete.
+5 = Exceptional clarity and proactive steps.
 
-Final Score 1–100:
-weights: Follow-up 15, No Drops 15, SLA 20, Resolution 20, Sentiment 15, Tone 15
-If a metric is NOT applicable, EXCLUDE it and RENORMALIZE remaining weights to sum 100.
-Convert 1–5 to percent: ((score-1)/4)*100.
-final_score = round(sum(percent_i * weight_i))
+5) CUSTOMER SENTIMENT (1–5)
+1 = Very negative or escalated.
+2 = Negative or frustrated.
+3 = Neutral or unclear.
+4 = Positive or cooperative.
+5 = Very appreciative and satisfied.
+
+6) AGENT TONE (1–5)
+1 = Rude or unprofessional.
+2 = Mechanical and not empathetic.
+3 = Neutral and correct.
+4 = Warm and polite.
+5 = Highly empathetic and personalized.
+
+FINAL SCORE (1–100):
+Weights: Follow-up 15% + No Drops 15% + SLA 20% + Resolution 20% + Sentiment 15% + Tone 15%.
+If a metric is NOT applicable, EXCLUDE it from the final score and RENORMALIZE remaining weights to sum to 100.
+You MUST return final_score as an integer 1–100.
 
 CATEGORY/SUBCATEGORY (STRICT):
 Use ONLY exact labels from Reference List (Category -> Subcategory -> Issue Summary).
@@ -497,17 +483,20 @@ Do not invent names.
 REFERENCE LIST:
 ${REFERENCE_LIST}
 
-Owner Change Log:
-- Use timestamps only to compute time per owner/role; round nearest 0.5h.
-- If empty/missing: current owner held full duration (closedTime-createdTime else now-createdTime).
+OWNER CHANGE LOG rules:
+- Use timestamps only to compute time per owner/role; round to nearest 0.5h.
+- Ignore system updates that do not change ownership.
+- Do not include customers/external users.
+- If Owner Change Log is empty/missing: current owner held full duration (closedTime-createdTime else now-createdTime).
 
-Ticket timestamps (may be missing):
+Ticket meta:
 createdTime: ${createdTime || "(missing)"}
 closedTime: ${closedTime || "(missing)"}
 currentOwnerName: ${currentOwnerName || "(missing)"}
 currentOwnerRole: ${currentOwnerRole || "(missing)"}
+threadCount: ${threadCount || "(missing)"}
 
-Return JSON ONLY, matching this schema:
+Return JSON ONLY, matching this schema exactly:
 {
   "title": "Ticket Follow-up Analysis",
   "follow_up_status": "Follow-up Completed|Delayed Follow-up|Missed Follow-up|No Commitment Found",
@@ -557,10 +546,7 @@ async function callOpenAI(prompt) {
 
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
@@ -576,46 +562,31 @@ async function callOpenAI(prompt) {
     const txt = await r.text();
     throw new Error(`OpenAI error ${r.status}: ${txt}`);
   }
-
   const data = await r.json();
   return JSON.parse(data.choices[0].message.content);
 }
 
-// ------------ Zoho token refresh ------------
+// ------------ Zoho token refresh (refresh-token flow) ------------
 async function refreshZohoAccessTokenIfPossible() {
   if (!ZOHO_REFRESH_TOKEN || !ZOHO_CLIENT_ID || !ZOHO_CLIENT_SECRET) return null;
 
-  const r = await fetch(`${ZOHO_ACCOUNTS_DOMAIN}/oauth/v2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      refresh_token: ZOHO_REFRESH_TOKEN,
-      client_id: ZOHO_CLIENT_ID,
-      client_secret: ZOHO_CLIENT_SECRET,
-      grant_type: "refresh_token",
-    }).toString(),
+  const url = `${ZOHO_ACCOUNTS_DOMAIN}/oauth/v2/token`;
+  const params = new URLSearchParams({
+    refresh_token: ZOHO_REFRESH_TOKEN,
+    client_id: ZOHO_CLIENT_ID,
+    client_secret: ZOHO_CLIENT_SECRET,
+    grant_type: "refresh_token",
   });
 
+  const r = await fetch(`${url}?${params.toString()}`, { method: "POST" });
   const data = await r.json().catch(() => ({}));
 
   if (!r.ok || !data.access_token) {
     console.error("Zoho token refresh failed:", r.status, data);
     return null;
   }
-
-  setCachedToken(data.access_token, Number(data.expires_in || 3600));
-  return cachedAccessToken;
-}
-
-async function getZohoAccessToken() {
-  const cached = getCachedTokenIfValid();
-  if (cached) return cached;
-
-  // if we have a token but no expiry info, try it once before refresh
-  if (cachedAccessToken && cachedAccessTokenExpiresAtMs === 0) return cachedAccessToken;
-
-  const refreshed = await refreshZohoAccessTokenIfPossible();
-  return refreshed;
+  DESK_OAUTH_TOKEN = data.access_token;
+  return DESK_OAUTH_TOKEN;
 }
 
 // ------------ Follow-up mapping ------------
@@ -629,19 +600,22 @@ function normalizeFollowUpStatus(raw) {
 }
 
 // ------------ Scoring helpers ------------
-function clampScore15(v) {
+function clampScore15OrZero(v) {
+  // 0 allowed ONLY for Not Applicable. Otherwise clamp to 1..5.
   if (v === null || v === undefined) return null;
   const n = Number(v);
   if (!Number.isFinite(n)) return null;
   const rounded = Math.round(n);
+  if (rounded === 0) return 0;
   if (rounded < 1) return 1;
   if (rounded > 5) return 5;
   return rounded;
 }
 
-function scoreToPct(score1to5) {
-  const s = clampScore15(score1to5);
+function scoreToPct(score1to5or0) {
+  const s = clampScore15OrZero(score1to5or0);
   if (s === null) return null;
+  if (s === 0) return null; // treat 0 as N/A for scoring math
   return ((s - 1) / 4) * 100;
 }
 
@@ -667,6 +641,7 @@ function computeFinalScoreDynamic(scores = {}, applicability = {}) {
 }
 
 function zohoNumericNA(v) {
+  // If Zoho numeric custom fields reject null, use 0 instead.
   if (v !== null && v !== undefined) return v;
   return NA_NUMERIC_STRATEGY === "zero" ? 0 : null;
 }
@@ -682,34 +657,26 @@ async function updateDeskTicket(ticketId, aiResult) {
   const scores = aiResult.scores || {};
   const scoreReasons = aiResult.score_reasons || {};
 
+  // Normalize scores (0 allowed only for N/A metrics)
   const normalizedScores = {
-    follow_up_frequency: clampScore15(scores.follow_up_frequency),
-    no_drops: clampScore15(scores.no_drops),
-    sla_adherence: clampScore15(scores.sla_adherence) ?? 3,
-    resolution_quality: clampScore15(scores.resolution_quality) ?? 3,
-    customer_sentiment: clampScore15(scores.customer_sentiment) ?? 3,
-    agent_tone: clampScore15(scores.agent_tone) ?? 3,
+    follow_up_frequency: clampScore15OrZero(scores.follow_up_frequency),
+    no_drops: clampScore15OrZero(scores.no_drops),
+    sla_adherence: clampScore15OrZero(scores.sla_adherence) ?? 3,
+    resolution_quality: clampScore15OrZero(scores.resolution_quality) ?? 3,
+    customer_sentiment: clampScore15OrZero(scores.customer_sentiment) ?? 3,
+    agent_tone: clampScore15OrZero(scores.agent_tone) ?? 3,
   };
 
-  // Hard enforce N/A behavior if applicability says false
+  // Enforce N/A behavior if applicability says false
   if (applicability.follow_up_frequency === false) {
-    normalizedScores.follow_up_frequency = null;
+    normalizedScores.follow_up_frequency = null; // store null (or 0 via strategy)
     scoreReasons.follow_up_frequency =
-      scoreReasons.follow_up_frequency ||
-      "Not applicable (single-thread ticket; no follow-up required).";
+      scoreReasons.follow_up_frequency || "Not applicable (no follow-up required).";
   }
   if (applicability.no_drops === false) {
-    normalizedScores.no_drops = null;
+    normalizedScores.no_drops = null; // store null (or 0 via strategy)
     scoreReasons.no_drops =
-      scoreReasons.no_drops ||
-      "Not applicable (single-touch ticket; no handoffs/gaps to evaluate).";
-  }
-
-  // Ensure SLA reason aligns with fallback behavior
-  if (clampScore15(scores.sla_adherence) === null) {
-    scoreReasons.sla_adherence =
-      scoreReasons.sla_adherence ||
-      "Timestamps insufficient/unclear; defaulted to rubric score 3.";
+      scoreReasons.no_drops || "Not applicable (no handoffs/gaps to evaluate).";
   }
 
   const followUpStatus = normalizeFollowUpStatus(aiResult.follow_up_status);
@@ -760,32 +727,26 @@ async function updateDeskTicket(ticketId, aiResult) {
       },
       body: JSON.stringify(body),
     });
-
     const data = await r.json().catch(() => ({}));
     return { r, data };
   }
 
-  const token = await getZohoAccessToken();
-  if (!token) {
+  // Ensure token is present
+  if (!DESK_OAUTH_TOKEN) await refreshZohoAccessTokenIfPossible();
+  if (!DESK_OAUTH_TOKEN) {
     console.warn("No Zoho access token available; skipping Desk update.");
     return { skipped: true };
   }
 
   console.log("Desk update payload:", JSON.stringify(body).slice(0, 900));
 
-  let { r, data } = await patchWithToken(token);
+  let { r, data } = await patchWithToken(DESK_OAUTH_TOKEN);
 
-  // Retry once if invalid oauth
-  const errCode = data?.errorCode || data?.code;
-  const msg = String(data?.message || data?.errorMessage || "");
-  const invalid =
+  // If token is invalid/expired, refresh once and retry
+  if (
     r.status === 401 &&
-    (String(errCode).toUpperCase().includes("INVALID_OAUTH") ||
-      msg.toUpperCase().includes("INVALID_OAUTH") ||
-      msg.toLowerCase().includes("invalid oauth") ||
-      msg.toLowerCase().includes("token you provided is invalid"));
-
-  if (invalid) {
+    (data?.errorCode === "INVALID_OAUTH" || `${data?.message || ""}`.toLowerCase().includes("invalid"))
+  ) {
     console.warn("Zoho token invalid; refreshing and retrying once...");
     const newTok = await refreshZohoAccessTokenIfPossible();
     if (newTok) ({ r, data } = await patchWithToken(newTok));
@@ -817,11 +778,12 @@ app.post("/desk-webhook", async (req, res) => {
       conversation = "",
       owner_change_log = "",
 
-      // OPTIONAL: send these if you can
+      // Optional (send if you can from Zoho Desk webhook / function)
       createdTime = "",
       closedTime = "",
       currentOwnerName = "",
       currentOwnerRole = "",
+      threadCount = "",
     } = body;
 
     console.log("Webhook hit:", JSON.stringify({ ticket_id, subject }).slice(0, 400));
@@ -838,11 +800,12 @@ app.post("/desk-webhook", async (req, res) => {
       closedTime,
       currentOwnerName,
       currentOwnerRole,
+      threadCount,
     });
 
     const ai = await callOpenAI(prompt);
 
-    // Compute final score server-side (guarantees N/A exclusion math)
+    // Always enforce final score server-side (guarantees N/A exclusion math)
     ai.final_score = computeFinalScoreDynamic(ai.scores || {}, ai.applicability || {});
 
     let deskResult = { skipped: true };
