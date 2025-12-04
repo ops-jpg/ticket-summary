@@ -1,6 +1,5 @@
 // server.js
 import express from "express";
-import crypto from "crypto";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -23,6 +22,28 @@ const ZOHO_ACCOUNTS_DOMAIN =
 
 // If Zoho numeric fields reject null, set NA_NUMERIC_STRATEGY=zero
 const NA_NUMERIC_STRATEGY = (process.env.NA_NUMERIC_STRATEGY || "null").toLowerCase(); // "null" | "zero"
+
+// ------------ TOKEN CACHE ------------
+let cachedAccessToken = DESK_OAUTH_TOKEN || null;
+let cachedAccessTokenExpiresAtMs = 0; // if unknown, 0
+
+function setCachedToken(token, expiresInSec) {
+  cachedAccessToken = token;
+  DESK_OAUTH_TOKEN = token;
+  if (Number.isFinite(expiresInSec) && expiresInSec > 0) {
+    // buffer 60s
+    cachedAccessTokenExpiresAtMs = Date.now() + Math.max(0, (expiresInSec - 60)) * 1000;
+  } else {
+    cachedAccessTokenExpiresAtMs = 0;
+  }
+}
+
+function getCachedTokenIfValid() {
+  if (!cachedAccessToken) return null;
+  if (cachedAccessTokenExpiresAtMs === 0) return cachedAccessToken; // unknown expiry; try it
+  if (Date.now() < cachedAccessTokenExpiresAtMs) return cachedAccessToken;
+  return null;
+}
 
 // ------------ CATEGORY / SUBCATEGORY / ISSUE SUMMARY (COMPACT) ------------
 const REFERENCE_LIST = `
@@ -533,9 +554,13 @@ ${ownerChangeLog || "(none)"}
 // ------------ OpenAI caller ------------
 async function callOpenAI(prompt) {
   if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY missing");
+
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
@@ -546,10 +571,12 @@ async function callOpenAI(prompt) {
       ],
     }),
   });
+
   if (!r.ok) {
     const txt = await r.text();
     throw new Error(`OpenAI error ${r.status}: ${txt}`);
   }
+
   const data = await r.json();
   return JSON.parse(data.choices[0].message.content);
 }
@@ -558,23 +585,37 @@ async function callOpenAI(prompt) {
 async function refreshZohoAccessTokenIfPossible() {
   if (!ZOHO_REFRESH_TOKEN || !ZOHO_CLIENT_ID || !ZOHO_CLIENT_SECRET) return null;
 
-  const url = `${ZOHO_ACCOUNTS_DOMAIN}/oauth/v2/token`;
-  const params = new URLSearchParams({
-    refresh_token: ZOHO_REFRESH_TOKEN,
-    client_id: ZOHO_CLIENT_ID,
-    client_secret: ZOHO_CLIENT_SECRET,
-    grant_type: "refresh_token",
+  const r = await fetch(`${ZOHO_ACCOUNTS_DOMAIN}/oauth/v2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      refresh_token: ZOHO_REFRESH_TOKEN,
+      client_id: ZOHO_CLIENT_ID,
+      client_secret: ZOHO_CLIENT_SECRET,
+      grant_type: "refresh_token",
+    }).toString(),
   });
 
-  const r = await fetch(`${url}?${params.toString()}`, { method: "POST" });
   const data = await r.json().catch(() => ({}));
 
   if (!r.ok || !data.access_token) {
     console.error("Zoho token refresh failed:", r.status, data);
     return null;
   }
-  DESK_OAUTH_TOKEN = data.access_token;
-  return DESK_OAUTH_TOKEN;
+
+  setCachedToken(data.access_token, Number(data.expires_in || 3600));
+  return cachedAccessToken;
+}
+
+async function getZohoAccessToken() {
+  const cached = getCachedTokenIfValid();
+  if (cached) return cached;
+
+  // if we have a token but no expiry info, try it once before refresh
+  if (cachedAccessToken && cachedAccessTokenExpiresAtMs === 0) return cachedAccessToken;
+
+  const refreshed = await refreshZohoAccessTokenIfPossible();
+  return refreshed;
 }
 
 // ------------ Follow-up mapping ------------
@@ -597,11 +638,13 @@ function clampScore15(v) {
   if (rounded > 5) return 5;
   return rounded;
 }
+
 function scoreToPct(score1to5) {
   const s = clampScore15(score1to5);
   if (s === null) return null;
   return ((s - 1) / 4) * 100;
 }
+
 function computeFinalScoreDynamic(scores = {}, applicability = {}) {
   const base = [
     ["follow_up_frequency", 15, applicability.follow_up_frequency !== false],
@@ -624,7 +667,6 @@ function computeFinalScoreDynamic(scores = {}, applicability = {}) {
 }
 
 function zohoNumericNA(v) {
-  // If Zoho numeric custom fields reject null, use 0 instead.
   if (v !== null && v !== undefined) return v;
   return NA_NUMERIC_STRATEGY === "zero" ? 0 : null;
 }
@@ -649,7 +691,7 @@ async function updateDeskTicket(ticketId, aiResult) {
     agent_tone: clampScore15(scores.agent_tone) ?? 3,
   };
 
-  // hard enforce N/A behavior if applicability says false
+  // Hard enforce N/A behavior if applicability says false
   if (applicability.follow_up_frequency === false) {
     normalizedScores.follow_up_frequency = null;
     scoreReasons.follow_up_frequency =
@@ -661,6 +703,13 @@ async function updateDeskTicket(ticketId, aiResult) {
     scoreReasons.no_drops =
       scoreReasons.no_drops ||
       "Not applicable (single-touch ticket; no handoffs/gaps to evaluate).";
+  }
+
+  // Ensure SLA reason aligns with fallback behavior
+  if (clampScore15(scores.sla_adherence) === null) {
+    scoreReasons.sla_adherence =
+      scoreReasons.sla_adherence ||
+      "Timestamps insufficient/unclear; defaulted to rubric score 3.";
   }
 
   const followUpStatus = normalizeFollowUpStatus(aiResult.follow_up_status);
@@ -701,7 +750,6 @@ async function updateDeskTicket(ticketId, aiResult) {
 
   const body = { customFields };
 
-  // Try once with current token; if INVALID_OAUTH, refresh and retry once
   async function patchWithToken(token) {
     const r = await fetch(`https://desk.zoho.com/api/v1/tickets/${ticketId}`, {
       method: "PATCH",
@@ -712,23 +760,32 @@ async function updateDeskTicket(ticketId, aiResult) {
       },
       body: JSON.stringify(body),
     });
+
     const data = await r.json().catch(() => ({}));
     return { r, data };
   }
 
-  if (!DESK_OAUTH_TOKEN) {
-    await refreshZohoAccessTokenIfPossible();
-  }
-  if (!DESK_OAUTH_TOKEN) {
+  const token = await getZohoAccessToken();
+  if (!token) {
     console.warn("No Zoho access token available; skipping Desk update.");
     return { skipped: true };
   }
 
   console.log("Desk update payload:", JSON.stringify(body).slice(0, 900));
 
-  let { r, data } = await patchWithToken(DESK_OAUTH_TOKEN);
+  let { r, data } = await patchWithToken(token);
 
-  if (r.status === 401 && (data?.errorCode === "INVALID_OAUTH" || `${data?.message || ""}`.includes("invalid"))) {
+  // Retry once if invalid oauth
+  const errCode = data?.errorCode || data?.code;
+  const msg = String(data?.message || data?.errorMessage || "");
+  const invalid =
+    r.status === 401 &&
+    (String(errCode).toUpperCase().includes("INVALID_OAUTH") ||
+      msg.toUpperCase().includes("INVALID_OAUTH") ||
+      msg.toLowerCase().includes("invalid oauth") ||
+      msg.toLowerCase().includes("token you provided is invalid"));
+
+  if (invalid) {
     console.warn("Zoho token invalid; refreshing and retrying once...");
     const newTok = await refreshZohoAccessTokenIfPossible();
     if (newTok) ({ r, data } = await patchWithToken(newTok));
