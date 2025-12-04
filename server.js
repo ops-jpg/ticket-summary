@@ -2,16 +2,27 @@
 import express from "express";
 import crypto from "crypto";
 
-// Node 18+ has global fetch.
-
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
 // ------------ ENV VARS ------------
 const DESK_SHARED_SECRET = process.env.DESK_SHARED_SECRET;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
 const ZOHO_ORG_ID = process.env.ZOHO_ORG_ID;
-const DESK_OAUTH_TOKEN = process.env.DESK_OAUTH_TOKEN;
+
+// Use either a pre-generated access token (short-lived) OR refresh flow (recommended)
+let ZOHO_OAUTH_TOKEN = process.env.ZOHO_OAUTH_TOKEN;
+
+// Refresh flow vars (recommended)
+const ZOHO_REFRESH_TOKEN = process.env.ZOHO_REFRESH_TOKEN;
+const ZOHO_CLIENT_ID = process.env.ZOHO_CLIENT_ID;
+const ZOHO_CLIENT_SECRET = process.env.ZOHO_CLIENT_SECRET;
+const ZOHO_ACCOUNTS_DOMAIN =
+  process.env.ZOHO_ACCOUNTS_DOMAIN || "https://accounts.zoho.com";
+
+// If Zoho numeric fields reject null, set NA_NUMERIC_STRATEGY=zero
+const NA_NUMERIC_STRATEGY = (process.env.NA_NUMERIC_STRATEGY || "null").toLowerCase(); // "null" | "zero"
 
 // ------------ CATEGORY / SUBCATEGORY / ISSUE SUMMARY (COMPACT) ------------
 const REFERENCE_LIST = `
@@ -402,103 +413,87 @@ const PROMPT = ({
   currentOwnerName,
   currentOwnerRole,
 }) => `
-You are an AI Ticket Audit Assistant. Analyze this Zoho Desk ticket for 360° agent performance using ONLY the provided data.
+You are an AI Ticket Audit Assistant. Analyze this Zoho Desk ticket for agent performance using ONLY the provided ticket data.
 
-Scoring Rubric:
-1) FOLLOW-UP FREQUENCY (1–5)
+You MUST evaluate applicability first:
+- Determine if ticket is "single-thread/single-touch" (minimal back-and-forth).
+- If single-touch AND no follow-up was needed, Follow-up metric is NOT applicable.
+- If single-touch AND no handoffs/gaps exist, No Drops metric is NOT applicable.
+
+Rubric (score 1–5 integers):
+1) FOLLOW-UP FREQUENCY
 1 No follow-up; customer waited >48h
 2 Late follow-up; customer chased
 3 Follow-ups but sometimes delayed
 4 Timely follow-ups; small delays
 5 Proactive; consistent; timely
 
-2) NO DROPS (1–5)
+2) NO DROPS
 1 Dropped/unassigned long
 2 Ownership gaps; stalled
 3 Minor stalls; recovered
 4 Smooth; tiny gaps
 5 Perfect continuity
 
-3) SLA ADHERENCE (1–5) (business hours aware)
+3) SLA ADHERENCE (business hours aware; use timestamps if present; otherwise score 3 and say timestamps insufficient)
 1 First response >4h OR resolution >24h
 2 First response >1h AND resolution >6h
-3 First response 30–60m OR resolution 4–6h
+3 First response 30–60m OR resolution 4–6h OR timestamps unclear
 4 First response <30m, resolution slightly late
 5 Both within SLA comfortably
-If timestamps missing/unclear => score 3 and note insufficient timestamps.
 
-4) RESOLUTION QUALITY (1–5)
+4) RESOLUTION QUALITY
 1 Incorrect/unhelpful
 2 Partially correct, unclear
 3 Correct, missing clarity
 4 Clear and complete
 5 Exceptional clarity + proactive
 
-5) CUSTOMER SENTIMENT (1–5)
+5) CUSTOMER SENTIMENT
 1 Very negative/escalated
 2 Negative/frustrated
 3 Neutral/unclear
 4 Positive/cooperative
 5 Very appreciative
 
-6) AGENT TONE (1–5)
+6) AGENT TONE
 1 Rude/unprofessional
 2 Mechanical/not empathetic
 3 Neutral/correct
 4 Warm/polite
 5 Highly empathetic/personalized
 
-IMPORTANT: Applicability Rules (exclude metrics from final score when not relevant)
-A) Follow-up not applicable:
-- If the ticket is a “single-thread / single-touch” ticket (one customer message and one agent response, OR only a single agent response and no continued back-and-forth)
-AND
-- No promised callback/follow-up was needed (no commitment found / no follow-up required)
-THEN:
-- Set "applicability.follow_up_frequency" = false
-- Set scores.follow_up_frequency = null
-- Set score_reasons.follow_up_frequency = "Not applicable (single-thread ticket; no follow-up required)."
+Final Score 1–100:
+weights: Follow-up 15, No Drops 15, SLA 20, Resolution 20, Sentiment 15, Tone 15
+If a metric is NOT applicable, EXCLUDE it and RENORMALIZE remaining weights to sum 100.
+Convert 1–5 to percent: ((score-1)/4)*100.
+final_score = round(sum(percent_i * weight_i))
 
-B) No Drops not applicable:
-- If the ticket is “single-touch” with no meaningful handoffs/gaps (e.g., no owner changes OR only one owner the entire time)
-THEN:
-- Set "applicability.no_drops" = false
-- Set scores.no_drops = null
-- Set score_reasons.no_drops = "Not applicable (single-touch ticket; no handoffs/gaps to evaluate)."
-
-Final Score (1–100):
-- Use weights: Follow-up 15%, No Drops 15%, SLA 20%, Resolution 20%, Sentiment 15%, Tone 15%
-- BUT if a metric is not applicable, EXCLUDE it and RENORMALIZE remaining weights to sum to 100%.
-- Convert 1–5 to 0–100 component as: ((score-1)/4)*100
-- final_score = round(sum(component * adjusted_weight))
-
-Category/Subcategory selection MUST use exact labels from Reference List.
+CATEGORY/SUBCATEGORY (STRICT):
+Use ONLY exact labels from Reference List (Category -> Subcategory -> Issue Summary).
+Do not invent names.
 
 REFERENCE LIST:
 ${REFERENCE_LIST}
 
-Owner Change Log rule:
-- Use owner change timestamps only (no guessing), round to nearest 0.5 hr.
-- Ignore system updates that do not change ownership.
-- If Owner Change Log empty/missing: treat current owner as holding full duration
-  (closedTime-createdTime else now-createdTime).
+Owner Change Log:
+- Use timestamps only to compute time per owner/role; round nearest 0.5h.
+- If empty/missing: current owner held full duration (closedTime-createdTime else now-createdTime).
 
-Ticket timestamps (may be empty):
+Ticket timestamps (may be missing):
 createdTime: ${createdTime || "(missing)"}
 closedTime: ${closedTime || "(missing)"}
 currentOwnerName: ${currentOwnerName || "(missing)"}
 currentOwnerRole: ${currentOwnerRole || "(missing)"}
 
-Return a single JSON object only:
+Return JSON ONLY, matching this schema:
 {
   "title": "Ticket Follow-up Analysis",
   "follow_up_status": "Follow-up Completed|Delayed Follow-up|Missed Follow-up|No Commitment Found",
   "category": "...",
   "subcategory": "...",
   "issue_summary": "...",
-  "applicability": {
-    "follow_up_frequency": true,
-    "no_drops": true
-  },
+  "applicability": { "follow_up_frequency": true, "no_drops": true },
   "scores": {
     "follow_up_frequency": 1,
     "no_drops": 1,
@@ -538,13 +533,9 @@ ${ownerChangeLog || "(none)"}
 // ------------ OpenAI caller ------------
 async function callOpenAI(prompt) {
   if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY missing");
-
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
@@ -555,14 +546,35 @@ async function callOpenAI(prompt) {
       ],
     }),
   });
-
   if (!r.ok) {
     const txt = await r.text();
     throw new Error(`OpenAI error ${r.status}: ${txt}`);
   }
-
   const data = await r.json();
   return JSON.parse(data.choices[0].message.content);
+}
+
+// ------------ Zoho token refresh ------------
+async function refreshZohoAccessTokenIfPossible() {
+  if (!ZOHO_REFRESH_TOKEN || !ZOHO_CLIENT_ID || !ZOHO_CLIENT_SECRET) return null;
+
+  const url = `${ZOHO_ACCOUNTS_DOMAIN}/oauth/v2/token`;
+  const params = new URLSearchParams({
+    refresh_token: ZOHO_REFRESH_TOKEN,
+    client_id: ZOHO_CLIENT_ID,
+    client_secret: ZOHO_CLIENT_SECRET,
+    grant_type: "refresh_token",
+  });
+
+  const r = await fetch(`${url}?${params.toString()}`, { method: "POST" });
+  const data = await r.json().catch(() => ({}));
+
+  if (!r.ok || !data.access_token) {
+    console.error("Zoho token refresh failed:", r.status, data);
+    return null;
+  }
+  ZOHO_OAUTH_TOKEN = data.access_token;
+  return ZOHO_OAUTH_TOKEN;
 }
 
 // ------------ Follow-up mapping ------------
@@ -576,7 +588,7 @@ function normalizeFollowUpStatus(raw) {
 }
 
 // ------------ Scoring helpers ------------
-function to15OrNull(v) {
+function clampScore15(v) {
   if (v === null || v === undefined) return null;
   const n = Number(v);
   if (!Number.isFinite(n)) return null;
@@ -586,43 +598,41 @@ function to15OrNull(v) {
   return rounded;
 }
 function scoreToPct(score1to5) {
-  // score is 1..5 => 0..100
-  const s = to15OrNull(score1to5);
+  const s = clampScore15(score1to5);
   if (s === null) return null;
   return ((s - 1) / 4) * 100;
 }
 function computeFinalScoreDynamic(scores = {}, applicability = {}) {
-  // base weights (sum 1.0)
   const base = [
-    ["follow_up_frequency", 0.15, applicability.follow_up_frequency !== false],
-    ["no_drops", 0.15, applicability.no_drops !== false],
-    ["sla_adherence", 0.2, true],
-    ["resolution_quality", 0.2, true],
-    ["customer_sentiment", 0.15, true],
-    ["agent_tone", 0.15, true],
+    ["follow_up_frequency", 15, applicability.follow_up_frequency !== false],
+    ["no_drops", 15, applicability.no_drops !== false],
+    ["sla_adherence", 20, true],
+    ["resolution_quality", 20, true],
+    ["customer_sentiment", 15, true],
+    ["agent_tone", 15, true],
   ];
 
-  // filter to applicable + score present
   const kept = base
-    .map(([k, w, app]) => {
-      const pct = scoreToPct(scores[k]);
-      return { k, w, app, pct };
-    })
+    .map(([k, w, app]) => ({ k, w, app, pct: scoreToPct(scores[k]) }))
     .filter((x) => x.app && x.pct !== null);
 
-  if (kept.length === 0) return 0;
+  if (!kept.length) return 0;
 
   const wsum = kept.reduce((a, x) => a + x.w, 0);
-  const normalized = kept.map((x) => ({ ...x, w: x.w / wsum }));
-
-  const final = normalized.reduce((a, x) => a + x.pct * x.w, 0);
+  const final = kept.reduce((a, x) => a + x.pct * (x.w / wsum), 0);
   return Math.round(final);
+}
+
+function zohoNumericNA(v) {
+  // If Zoho numeric custom fields reject null, use 0 instead.
+  if (v !== null && v !== undefined) return v;
+  return NA_NUMERIC_STRATEGY === "zero" ? 0 : null;
 }
 
 // ------------ Update Zoho Desk ticket ------------
 async function updateDeskTicket(ticketId, aiResult) {
-  if (!DESK_OAUTH_TOKEN || !ZOHO_ORG_ID) {
-    console.warn("DESK_OAUTH_TOKEN or ZOHO_ORG_ID missing; skipping Desk update.");
+  if (!ZOHO_ORG_ID) {
+    console.warn("ZOHO_ORG_ID missing; skipping Desk update.");
     return { skipped: true };
   }
 
@@ -630,17 +640,16 @@ async function updateDeskTicket(ticketId, aiResult) {
   const scores = aiResult.scores || {};
   const scoreReasons = aiResult.score_reasons || {};
 
-  // Normalize: allow nulls for not applicable
   const normalizedScores = {
-    follow_up_frequency: to15OrNull(scores.follow_up_frequency),
-    no_drops: to15OrNull(scores.no_drops),
-    sla_adherence: to15OrNull(scores.sla_adherence) ?? 3,
-    resolution_quality: to15OrNull(scores.resolution_quality) ?? 3,
-    customer_sentiment: to15OrNull(scores.customer_sentiment) ?? 3,
-    agent_tone: to15OrNull(scores.agent_tone) ?? 3,
+    follow_up_frequency: clampScore15(scores.follow_up_frequency),
+    no_drops: clampScore15(scores.no_drops),
+    sla_adherence: clampScore15(scores.sla_adherence) ?? 3,
+    resolution_quality: clampScore15(scores.resolution_quality) ?? 3,
+    customer_sentiment: clampScore15(scores.customer_sentiment) ?? 3,
+    agent_tone: clampScore15(scores.agent_tone) ?? 3,
   };
 
-  // Force N/A behavior when applicability says false
+  // hard enforce N/A behavior if applicability says false
   if (applicability.follow_up_frequency === false) {
     normalizedScores.follow_up_frequency = null;
     scoreReasons.follow_up_frequency =
@@ -654,10 +663,6 @@ async function updateDeskTicket(ticketId, aiResult) {
       "Not applicable (single-touch ticket; no handoffs/gaps to evaluate).";
   }
 
-  // Compute final 1–100 dynamically (excluding N/A)
-  const finalScore100 = computeFinalScoreDynamic(normalizedScores, applicability);
-  aiResult.final_score = finalScore100;
-
   const followUpStatus = normalizeFollowUpStatus(aiResult.follow_up_status);
   const ownerTimeRemark = aiResult.owner_time_summary || "";
   const aiMainSummary = aiResult.reasons || "";
@@ -665,8 +670,8 @@ async function updateDeskTicket(ticketId, aiResult) {
   const timeSpentPerRole = aiResult.time_spent_per_role || "";
   const issueSummary = aiResult.issue_summary || "";
 
-  // ---- custom fields by LABEL (Zoho Desk UI labels) ----
-  // If your Zoho fields do NOT accept null, change null to 0 or "" as needed.
+  const finalScore100 = computeFinalScoreDynamic(normalizedScores, applicability);
+
   const customFields = {
     "Follow-up Status": followUpStatus,
     "AI Category": aiResult.category || "",
@@ -674,8 +679,8 @@ async function updateDeskTicket(ticketId, aiResult) {
     "AI Final Score": finalScore100,
     "AI Category explanation": aiMainSummary,
 
-    "Follow-Up Frequency": normalizedScores.follow_up_frequency,
-    "No Drops Score": normalizedScores.no_drops,
+    "Follow-Up Frequency": zohoNumericNA(normalizedScores.follow_up_frequency),
+    "No Drops Score": zohoNumericNA(normalizedScores.no_drops),
     "SLA Adherence": normalizedScores.sla_adherence,
     "Resolution Quality": normalizedScores.resolution_quality,
     "Customer Sentiment": normalizedScores.customer_sentiment,
@@ -694,32 +699,41 @@ async function updateDeskTicket(ticketId, aiResult) {
     "Issue Summary": issueSummary,
   };
 
-  const body = {
-    customFields,
-    cf: {
-      // Replace with your real API names if you use them
-      cf_ai_category_explanation: aiMainSummary,
-      cf_remarks_oc_log: ownerTimeRemark,
-      cf_ts_resolution: ownerTimeRemark,
-      cf_csm_resolution: timeSpentPerUser,
-      cf_voip_resolution: timeSpentPerRole,
-      cf_tech_csm_resolution: issueSummary,
-    },
-  };
+  const body = { customFields };
+
+  // Try once with current token; if INVALID_OAUTH, refresh and retry once
+  async function patchWithToken(token) {
+    const r = await fetch(`https://desk.zoho.com/api/v1/tickets/${ticketId}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${token}`,
+        orgId: ZOHO_ORG_ID,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({}));
+    return { r, data };
+  }
+
+  if (!ZOHO_OAUTH_TOKEN) {
+    await refreshZohoAccessTokenIfPossible();
+  }
+  if (!ZOHO_OAUTH_TOKEN) {
+    console.warn("No Zoho access token available; skipping Desk update.");
+    return { skipped: true };
+  }
 
   console.log("Desk update payload:", JSON.stringify(body).slice(0, 900));
 
-  const r = await fetch(`https://desk.zoho.com/api/v1/tickets/${ticketId}`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Zoho-oauthtoken ${DESK_OAUTH_TOKEN}`,
-      orgId: ZOHO_ORG_ID,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  let { r, data } = await patchWithToken(ZOHO_OAUTH_TOKEN);
 
-  const data = await r.json().catch(() => ({}));
+  if (r.status === 401 && (data?.errorCode === "INVALID_OAUTH" || `${data?.message || ""}`.includes("invalid"))) {
+    console.warn("Zoho token invalid; refreshing and retrying once...");
+    const newTok = await refreshZohoAccessTokenIfPossible();
+    if (newTok) ({ r, data } = await patchWithToken(newTok));
+  }
+
   console.log("Desk update response:", r.status, JSON.stringify(data).slice(0, 1200));
   return { status: r.status, data };
 }
@@ -746,7 +760,7 @@ app.post("/desk-webhook", async (req, res) => {
       conversation = "",
       owner_change_log = "",
 
-      // OPTIONAL: include these in your webhook payload if possible
+      // OPTIONAL: send these if you can
       createdTime = "",
       closedTime = "",
       currentOwnerName = "",
@@ -771,7 +785,7 @@ app.post("/desk-webhook", async (req, res) => {
 
     const ai = await callOpenAI(prompt);
 
-    // Recompute final score in Node (exclude N/A reliably)
+    // Compute final score server-side (guarantees N/A exclusion math)
     ai.final_score = computeFinalScoreDynamic(ai.scores || {}, ai.applicability || {});
 
     let deskResult = { skipped: true };
