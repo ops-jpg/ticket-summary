@@ -12,7 +12,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ZOHO_ORG_ID = process.env.ZOHO_ORG_ID;
 
 // Use either a pre-generated access token (short-lived) OR refresh flow (recommended)
-let ZOHO_OAUTH_TOKEN = process.env.ZOHO_OAUTH_TOKEN;
+let DESK_OAUTH_TOKEN = process.env.DESK_OAUTH_TOKEN;
 
 // Refresh flow vars (recommended)
 const ZOHO_REFRESH_TOKEN = process.env.ZOHO_REFRESH_TOKEN;
@@ -573,8 +573,8 @@ async function refreshZohoAccessTokenIfPossible() {
     console.error("Zoho token refresh failed:", r.status, data);
     return null;
   }
-  ZOHO_OAUTH_TOKEN = data.access_token;
-  return ZOHO_OAUTH_TOKEN;
+  DESK_OAUTH_TOKEN = data.access_token;
+  return DESK_OAUTH_TOKEN;
 }
 
 // ------------ Follow-up mapping ------------
@@ -716,17 +716,17 @@ async function updateDeskTicket(ticketId, aiResult) {
     return { r, data };
   }
 
-  if (!ZOHO_OAUTH_TOKEN) {
+  if (!DESK_OAUTH_TOKEN) {
     await refreshZohoAccessTokenIfPossible();
   }
-  if (!ZOHO_OAUTH_TOKEN) {
+  if (!DESK_OAUTH_TOKEN) {
     console.warn("No Zoho access token available; skipping Desk update.");
     return { skipped: true };
   }
 
   console.log("Desk update payload:", JSON.stringify(body).slice(0, 900));
 
-  let { r, data } = await patchWithToken(ZOHO_OAUTH_TOKEN);
+  let { r, data } = await patchWithToken(DESK_OAUTH_TOKEN);
 
   if (r.status === 401 && (data?.errorCode === "INVALID_OAUTH" || `${data?.message || ""}`.includes("invalid"))) {
     console.warn("Zoho token invalid; refreshing and retrying once...");
