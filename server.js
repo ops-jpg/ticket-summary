@@ -383,6 +383,10 @@ Call Tracking Issue:
 - Number not working: number dead
 - Call Forwarding Issue: forwarding wrong
 
+Website Edits Issues:
+- website Edit: Page not updating
+- website Edits: Broken Links
+
 Permission Issue:
 - User Role Issue: wrong role
 - Access Denied: access denied
