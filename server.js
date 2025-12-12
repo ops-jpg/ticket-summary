@@ -383,10 +383,6 @@ Call Tracking Issue:
 - Number not working: number dead
 - Call Forwarding Issue: forwarding wrong
 
-Website Edits Issues:
-- website Edit: Page not updating
-- website Edits: Broken Links
-
 Permission Issue:
 - User Role Issue: wrong role
 - Access Denied: access denied
@@ -409,8 +405,7 @@ Appointment Issue:
 - Appointment not syncing: not in Adit/EHR
 `;
 
-// ------------ PROMPT ------------
-// (Note: we won’t call AI for single-thread tickets at all; this prompt is for multi-thread tickets.)
+// ------------ PROMPT (multi-thread only) ------------
 const PROMPT = ({
   subject,
   status,
@@ -425,8 +420,10 @@ const PROMPT = ({
   currentOwnerRole,
 }) => `
 You are an AI Ticket Audit Assistant. Analyze this Zoho Desk ticket for agent performance using ONLY the provided ticket data.
+IMPORTANT: This ticket has MULTIPLE threads and requires a full evaluation. Do NOT say "not enough data" if the conversation includes multiple messages.
 
-Rubric (score 1–5 integers):
+Score each metric 1–5 using this rubric:
+
 1) FOLLOW-UP FREQUENCY
 1 No follow-up; customer waited >48h
 2 Late follow-up; customer chased
@@ -441,7 +438,7 @@ Rubric (score 1–5 integers):
 4 Smooth; tiny gaps
 5 Perfect continuity
 
-3) SLA ADHERENCE (business hours aware; use ticket timestamps)
+3) SLA ADHERENCE (business hours aware; use ticket timestamps and message timestamps)
 1 First response >4h OR resolution >24h
 2 First response >1h AND resolution >6h
 3 First response 30–60m OR resolution 4–6h
@@ -469,21 +466,20 @@ Rubric (score 1–5 integers):
 4 Warm/polite
 5 Highly empathetic/personalized
 
-Final Score 1–100:
-weights: Follow-up 15, No Drops 15, SLA 20, Resolution 20, Sentiment 15, Tone 15
-Convert 1–5 to percent: ((score-1)/4)*100.
-final_score = round(sum(percent_i * weight_i / 100))
+Final Score 1–100 weighted:
+Follow-up 15% + No Drops 15% + SLA 20% + Resolution 20% + Sentiment 15% + Tone 15%
+Convert 1–5 to percent: ((score-1)/4)*100
+final_score = round(sum(percent_i * weight_i/100))
 
 CATEGORY/SUBCATEGORY (STRICT):
-Use ONLY exact labels from Reference List (Category -> Subcategory -> Issue Summary).
-Do not invent names.
+Pick ONLY exact labels from Reference List. Do not invent.
 
 REFERENCE LIST:
 ${REFERENCE_LIST}
 
 Owner Change Log:
-- Use timestamps only to compute time per owner/role; round nearest 0.5h.
-- If empty/missing: current owner held full duration (closedTime-createdTime else now-createdTime).
+- Use timestamps ONLY to compute time per owner/role; round nearest 0.5h.
+- If empty/missing: assume current owner held full duration (closedTime-createdTime else now-createdTime).
 
 Ticket timestamps:
 createdTime: ${createdTime || "(missing)"}
@@ -491,34 +487,34 @@ closedTime: ${closedTime || "(missing)"}
 currentOwnerName: ${currentOwnerName || "(missing)"}
 currentOwnerRole: ${currentOwnerRole || "(missing)"}
 
-Return JSON ONLY:
+Return JSON ONLY with this schema:
 {
-  "title": "Ticket Follow-up Analysis",
-  "follow_up_status": "Follow-up Completed|Delayed Follow-up|Missed Follow-up|No Commitment Found",
-  "category": "...",
-  "subcategory": "...",
-  "issue_summary": "...",
-  "scores": {
-    "follow_up_frequency": 1,
-    "no_drops": 1,
-    "sla_adherence": 1,
-    "resolution_quality": 1,
-    "customer_sentiment": 1,
-    "agent_tone": 1
+  "title":"Ticket Follow-up Analysis",
+  "follow_up_status":"Follow-up Completed|Delayed Follow-up|Missed Follow-up|No Commitment Found",
+  "category":"...",
+  "subcategory":"...",
+  "issue_summary":"...",
+  "scores":{
+    "follow_up_frequency":1,
+    "no_drops":1,
+    "sla_adherence":1,
+    "resolution_quality":1,
+    "customer_sentiment":1,
+    "agent_tone":1
   },
-  "score_reasons": {
-    "follow_up_frequency": "...",
-    "no_drops": "...",
-    "sla_adherence": "...",
-    "resolution_quality": "...",
-    "customer_sentiment": "...",
-    "agent_tone": "..."
+  "score_reasons":{
+    "follow_up_frequency":"...",
+    "no_drops":"...",
+    "sla_adherence":"...",
+    "resolution_quality":"...",
+    "customer_sentiment":"...",
+    "agent_tone":"..."
   },
-  "final_score": 0,
-  "reasons": "one brief paragraph",
-  "owner_time_summary": "one short sentence",
-  "time_spent_per_user": "Name - 1.5 hrs\\nName2 - 2 hrs",
-  "time_spent_per_role": "Role - 1.5 hrs\\nRole2 - 2 hrs"
+  "final_score":0,
+  "reasons":"one brief paragraph",
+  "owner_time_summary":"one short sentence",
+  "time_spent_per_user":"Name - 1.5 hrs\\nName2 - 2 hrs",
+  "time_spent_per_role":"Role - 1.5 hrs\\nRole2 - 2 hrs"
 }
 
 Ticket:
@@ -553,10 +549,7 @@ async function callOpenAI(prompt) {
       ],
     }),
   });
-  if (!r.ok) {
-    const txt = await r.text();
-    throw new Error(`OpenAI error ${r.status}: ${txt}`);
-  }
+  if (!r.ok) throw new Error(`OpenAI error ${r.status}: ${await r.text()}`);
   const data = await r.json();
   return JSON.parse(data.choices[0].message.content);
 }
@@ -586,8 +579,7 @@ async function refreshZohoAccessTokenIfPossible() {
 
 async function getZohoAccessToken() {
   if (DESK_OAUTH_TOKEN) return DESK_OAUTH_TOKEN;
-  const t = await refreshZohoAccessTokenIfPossible();
-  return t;
+  return await refreshZohoAccessTokenIfPossible();
 }
 
 // ------------ Desk API helpers ------------
@@ -601,12 +593,7 @@ async function deskGetTicket(ticketId) {
   });
   const data = await r.json().catch(() => ({}));
 
-  // if token invalid, refresh and retry once
-  if (
-    r.status === 401 &&
-    (data?.errorCode === "INVALID_OAUTH" ||
-      `${data?.message || ""}`.toLowerCase().includes("invalid"))
-  ) {
+  if (r.status === 401 && `${data?.message || ""}`.toLowerCase().includes("invalid")) {
     const nt = await refreshZohoAccessTokenIfPossible();
     if (!nt) return data;
     const r2 = await fetch(`https://desk.zoho.com/api/v1/tickets/${ticketId}`, {
@@ -623,7 +610,7 @@ async function deskPatchTicket(ticketId, body) {
   const tok = await getZohoAccessToken();
   if (!tok) throw new Error("No Zoho access token available");
 
-  async function patchWith(token) {
+  const doPatch = async (token) => {
     const r = await fetch(`https://desk.zoho.com/api/v1/tickets/${ticketId}`, {
       method: "PATCH",
       headers: {
@@ -635,59 +622,41 @@ async function deskPatchTicket(ticketId, body) {
     });
     const data = await r.json().catch(() => ({}));
     return { r, data };
-  }
+  };
 
-  let { r, data } = await patchWith(tok);
+  let { r, data } = await doPatch(tok);
 
-  if (
-    r.status === 401 &&
-    (data?.errorCode === "INVALID_OAUTH" ||
-      `${data?.message || ""}`.toLowerCase().includes("invalid"))
-  ) {
+  if (r.status === 401 && `${data?.message || ""}`.toLowerCase().includes("invalid")) {
     const nt = await refreshZohoAccessTokenIfPossible();
-    if (nt) ({ r, data } = await patchWith(nt));
+    if (nt) ({ r, data } = await doPatch(nt));
   }
 
   return { status: r.status, data };
 }
 
 // ------------ Single-thread detection ------------
-function isSingleThread({ thread_count, conversation, conversationCount }) {
-  // Best: explicit thread_count from webhook
+function isSingleThread({ thread_count, conversation }) {
   if (Number.isFinite(Number(thread_count))) return Number(thread_count) <= 1;
 
-  // Next: explicit conversationCount
-  if (Number.isFinite(Number(conversationCount))) return Number(conversationCount) <= 1;
-
-  // Heuristic: count timestamp-like markers in the conversation string
   if (typeof conversation !== "string" || !conversation.trim()) return true;
 
-  // Common patterns seen in your payloads:
-  // 0000[2025-11-28T13:32:09.604Z] ...
-  // [2025-11-27T18:43:25.000Z] ...
-  const matches =
-    conversation.match(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/g) || [];
+  const ts = conversation.match(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/g) || [];
+  const markers = conversation.match(/(^|\n)\s*(user|agent|customer|support)\s*:/gi) || [];
 
-  // If we can’t find timestamps, fall back to lines containing "User:" / "Agent:" style
-  const msgMarkers =
-    conversation.match(/(^|\n)\s*(user|agent|customer|support)\s*:/gi) || [];
-
-  const approxMessages = Math.max(matches.length, msgMarkers.length);
-
-  return approxMessages <= 1;
+  return Math.max(ts.length, markers.length) <= 1;
 }
 
 // ------------ Owner Change Log normalization ------------
 function buildOwnerLogWhenEmpty({ currentOwnerName, currentOwnerRole, createdTime, closedTime }) {
   const owner = currentOwnerName || "Current Owner";
-  const role = currentOwnerRole || "Current Owner Role";
-  const ct = createdTime || "(createdTime missing)";
-  const xt = closedTime || "(closed/now missing)";
+  const role = currentOwnerRole || "Agent";
+  const from = createdTime || "(createdTime missing)";
+  const to = closedTime || "(closedTime missing)";
   return `Auto-filled (owner_change_log was empty)
 Owner: ${owner}
 Role: ${role}
-From: ${ct}
-To: ${xt}`;
+From: ${from}
+To: ${to}`;
 }
 
 // ------------ Follow-up mapping ------------
@@ -716,7 +685,6 @@ function scoreToPct(score1to5) {
   return ((s - 1) / 4) * 100;
 }
 function computeFinalScore100(scores = {}) {
-  // Fixed weights, always present for multi-thread tickets (since we’re skipping single-thread entirely)
   const weights = {
     follow_up_frequency: 15,
     no_drops: 15,
@@ -725,20 +693,18 @@ function computeFinalScore100(scores = {}) {
     customer_sentiment: 15,
     agent_tone: 15,
   };
-  const keys = Object.keys(weights);
 
-  // Convert to pct and compute weighted average
   let sumW = 0;
   let sum = 0;
-  for (const k of keys) {
+
+  for (const [k, w] of Object.entries(weights)) {
     const pct = scoreToPct(scores[k]);
-    const w = weights[k];
     if (pct === null) continue;
     sumW += w;
     sum += pct * (w / 100);
   }
   if (!sumW) return 0;
-  // If something missing, renormalize
+
   const renorm = sum * (100 / sumW);
   return Math.round(renorm);
 }
@@ -747,13 +713,19 @@ function zohoNumericNA(v) {
   return NA_NUMERIC_STRATEGY === "zero" ? 0 : null;
 }
 
-// ------------ Update Zoho Desk ticket (full AI writeback) ------------
-async function updateDeskTicket(ticketId, aiResult) {
-  if (!ZOHO_ORG_ID) {
-    console.warn("ZOHO_ORG_ID missing; skipping Desk update.");
-    return { skipped: true };
-  }
+// ------------ Update only Owner Change Log (when empty) ------------
+async function updateOwnerChangeLogOnly(ticketId, ownerLogText) {
+  if (!ticketId || !ownerLogText) return { skipped: true };
+  const body = { customFields: { [OWNER_CHANGE_LOG_LABEL]: ownerLogText } };
 
+  console.log("Owner Change Log auto-fill payload:", JSON.stringify(body).slice(0, 700));
+  const result = await deskPatchTicket(ticketId, body);
+  console.log("Owner Change Log auto-fill response:", result.status, JSON.stringify(result.data).slice(0, 700));
+  return result;
+}
+
+// ------------ Update Zoho Desk ticket (AI writeback) ------------
+async function updateDeskTicket(ticketId, aiResult) {
   const scores = aiResult.scores || {};
   const scoreReasons = aiResult.score_reasons || {};
 
@@ -766,21 +738,14 @@ async function updateDeskTicket(ticketId, aiResult) {
     agent_tone: clampScore15(scores.agent_tone),
   };
 
-  const followUpStatus = normalizeFollowUpStatus(aiResult.follow_up_status);
-  const ownerTimeRemark = aiResult.owner_time_summary || "";
-  const aiMainSummary = aiResult.reasons || "";
-  const timeSpentPerUser = aiResult.time_spent_per_user || "";
-  const timeSpentPerRole = aiResult.time_spent_per_role || "";
-  const issueSummary = aiResult.issue_summary || "";
-
   const finalScore100 = computeFinalScore100(normalizedScores);
 
   const customFields = {
-    "Follow-up Status": followUpStatus,
+    "Follow-up Status": normalizeFollowUpStatus(aiResult.follow_up_status),
     "AI Category": aiResult.category || "",
     "AI Sub Category": aiResult.subcategory || "",
     "AI Final Score": finalScore100,
-    "AI Category explanation": aiMainSummary,
+    "AI Category explanation": aiResult.reasons || "",
 
     "Follow-Up Frequency": zohoNumericNA(normalizedScores.follow_up_frequency),
     "No Drops Score": zohoNumericNA(normalizedScores.no_drops),
@@ -796,41 +761,17 @@ async function updateDeskTicket(ticketId, aiResult) {
     "Reason Customer Sentiment": scoreReasons.customer_sentiment || "",
     "Reason Agent Tone": scoreReasons.agent_tone || "",
 
-    "Remarks-OC Log": ownerTimeRemark,
-    "Time Spent Per User": timeSpentPerUser,
-    "Time Spent Per Role": timeSpentPerRole,
-    "Issue Summary": issueSummary,
+    "Remarks-OC Log": aiResult.owner_time_summary || "",
+    "Time Spent Per User": aiResult.time_spent_per_user || "",
+    "Time Spent Per Role": aiResult.time_spent_per_role || "",
+    "Issue Summary": aiResult.issue_summary || "",
   };
 
   const body = { customFields };
 
   console.log("Desk update payload:", JSON.stringify(body).slice(0, 900));
   const result = await deskPatchTicket(ticketId, body);
-  console.log(
-    "Desk update response:",
-    result.status,
-    JSON.stringify(result.data).slice(0, 900)
-  );
-  return result;
-}
-
-// ------------ Update only Owner Change Log (when empty) ------------
-async function updateOwnerChangeLogOnly(ticketId, ownerLogText) {
-  if (!ticketId || !ownerLogText) return { skipped: true };
-  if (!ZOHO_ORG_ID) return { skipped: true };
-
-  const body = { customFields: { [OWNER_CHANGE_LOG_LABEL]: ownerLogText } };
-  console.log(
-    "Owner Change Log auto-fill payload:",
-    JSON.stringify(body).slice(0, 700)
-  );
-
-  const result = await deskPatchTicket(ticketId, body);
-  console.log(
-    "Owner Change Log auto-fill response:",
-    result.status,
-    JSON.stringify(result.data).slice(0, 700)
-  );
+  console.log("Desk update response:", result.status, JSON.stringify(result.data).slice(0, 900));
   return result;
 }
 
@@ -844,7 +785,6 @@ app.post("/desk-webhook", async (req, res) => {
     if (!secret || secret !== DESK_SHARED_SECRET) {
       return res.status(403).json({ error: "Unauthorized" });
     }
-
     if (!ZOHO_ORG_ID) {
       return res.status(500).json({ error: "ZOHO_ORG_ID missing" });
     }
@@ -860,66 +800,49 @@ app.post("/desk-webhook", async (req, res) => {
       conversation = "",
       owner_change_log = "",
 
-      // optional fields if webhook provides them
+      // IMPORTANT: these names must match what Deluge sends
       createdTime = "",
       closedTime = "",
       currentOwnerName = "",
       currentOwnerRole = "",
-      thread_count = undefined, // preferred if available
+
+      thread_count = undefined,
     } = body;
 
-    console.log(
-      "Webhook hit:",
-      JSON.stringify({ ticket_id, subject }).slice(0, 400)
-    );
+    console.log("Webhook hit:", JSON.stringify({ ticket_id, subject, thread_count }).slice(0, 400));
 
-    // If we have ticket_id, fetch ticket to enrich missing fields AND get threadCount
+    // Enrich from Desk (optional, but helps)
     let deskTicket = null;
     if (ticket_id) {
       try {
         deskTicket = await deskGetTicket(ticket_id);
       } catch (e) {
-        console.warn("Could not fetch ticket details from Desk:", e?.message || e);
+        console.warn("Could not fetch ticket details:", e?.message || e);
       }
     }
 
-    // Fill missing fields from Desk response if available
     if (deskTicket && typeof deskTicket === "object") {
       createdTime = createdTime || deskTicket?.createdTime || "";
       closedTime = closedTime || deskTicket?.closedTime || "";
-      channel = channel || deskTicket?.channel || "N/A";
-      status = status || deskTicket?.status || "N/A";
-      priority = priority || deskTicket?.priority || "N/A";
+      channel = channel || deskTicket?.channel || channel;
+      status = status || deskTicket?.status || status;
+      priority = priority || deskTicket?.priority || priority;
       department = department || deskTicket?.departmentId || department;
 
-      // Try a few common owner structures
       currentOwnerName =
         currentOwnerName ||
         deskTicket?.assignee?.name ||
         deskTicket?.assignee?.email ||
         deskTicket?.owner?.name ||
-        "";
+        currentOwnerName;
 
-      // Role can be whatever you want; if you have real role metadata, pass it in webhook.
       currentOwnerRole = currentOwnerRole || "Agent";
 
-      // thread count if desk returns it
       if (thread_count === undefined) {
-        thread_count =
-          deskTicket?.threadCount ??
-          deskTicket?.thread_count ??
-          deskTicket?.threadcount ??
-          undefined;
+        thread_count = deskTicket?.threadCount ?? deskTicket?.thread_count ?? undefined;
       }
     }
 
-    const singleThread = isSingleThread({
-      thread_count,
-      conversation,
-      conversationCount: body?.conversation_count,
-    });
-
-    // If owner_change_log is empty, always fill Owner Change Log field with current owner info
     const ownerLogEmpty = !owner_change_log || !String(owner_change_log).trim();
     if (ownerLogEmpty && ticket_id) {
       const ownerLogText = buildOwnerLogWhenEmpty({
@@ -928,15 +851,12 @@ app.post("/desk-webhook", async (req, res) => {
         createdTime,
         closedTime,
       });
-
-      // Update this field in Desk (even if we skip AI)
       await updateOwnerChangeLogOnly(ticket_id, ownerLogText);
-
-      // Also use this for AI if needed later
       owner_change_log = ownerLogText;
     }
 
-    // ✅ Desired behavior: if only one thread, SKIP AI update
+    // ✅ If single-thread, skip AI and ticket scoring update
+    const singleThread = isSingleThread({ thread_count, conversation });
     if (singleThread) {
       return res.json({
         ok: true,
@@ -946,7 +866,7 @@ app.post("/desk-webhook", async (req, res) => {
       });
     }
 
-    // Otherwise proceed with AI scoring + update
+    // Multi-thread: call AI and update ticket
     const prompt = PROMPT({
       subject,
       status,
@@ -963,19 +883,16 @@ app.post("/desk-webhook", async (req, res) => {
 
     const ai = await callOpenAI(prompt);
 
-    // Force final score server-side (ensures 1–100 weighting consistent)
+    // enforce final score server-side
     ai.final_score = computeFinalScore100(ai.scores || {});
 
     let deskResult = { skipped: true };
     if (ticket_id) deskResult = await updateDeskTicket(ticket_id, ai);
-    else console.warn("No ticket_id in payload; skipping Desk update.");
 
     return res.json({ ok: true, ai, desk: deskResult });
   } catch (err) {
     console.error("Webhook error:", err);
-    return res
-      .status(500)
-      .json({ ok: false, error: err.message || "Unknown error" });
+    return res.status(500).json({ ok: false, error: err.message || "Unknown error" });
   }
 });
 
