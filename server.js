@@ -426,53 +426,86 @@ const PROMPT = ({
 }) => `
 You are an AI Ticket Audit Assistant. Analyze this Zoho Desk ticket for agent performance using ONLY the provided ticket data.
 
-Rubric (score 1–5 integers):
+
+For each category below, give a score from 1 to 5:
+
 1) FOLLOW-UP FREQUENCY
-1 No follow-up; customer waited >48h
-2 Late follow-up; customer chased
-3 Follow-ups but sometimes delayed
-4 Timely follow-ups; small delays
-5 Proactive; consistent; timely
+1 – No follow-up; customer waited >48h
+2 – Late follow-up; customer had to chase
+3 – Follow-ups present but sometimes delayed
+4 – Mostly timely; minor delays
+5 – Proactive, consistent, timely
 
 2) NO DROPS
-1 Dropped/unassigned long
-2 Ownership gaps; stalled
-3 Minor stalls; recovered
-4 Smooth; tiny gaps
-5 Perfect continuity
+1 – Ticket dropped/unattended for long
+2 – Ownership gaps; ticket stalled
+3 – Minor stalls but recovered
+4 – Smooth flow; tiny gaps
+5 – Perfect continuity
 
-3) SLA ADHERENCE (business hours aware; use ticket timestamps)
-1 First response >4h OR resolution >24h
-2 First response >1h AND resolution >6h
-3 First response 30–60m OR resolution 4–6h
-4 First response <30m, resolution slightly late
-5 Both within SLA comfortably
+3) SLA ADHERENCE
+(Use Zoho Desk timestamps)
+1 – First response >4h OR resolution >24h
+2 – First response >1h AND resolution >6h
+3 – First response 30–60 min OR resolution 4–6h
+4 – First response <30 min; resolution slightly late
+5 – Fully within SLA
 
 4) RESOLUTION QUALITY
-1 Incorrect/unhelpful
-2 Partially correct, unclear
-3 Correct, missing clarity
-4 Clear and complete
-5 Exceptional clarity + proactive
+1 – Incorrect / unhelpful
+2 – Partially correct / unclear
+3 – Correct but missing clarity
+4 – Clear and complete
+5 – Exceptional clarity and proactive
 
 5) CUSTOMER SENTIMENT
-1 Very negative/escalated
-2 Negative/frustrated
-3 Neutral/unclear
-4 Positive/cooperative
-5 Very appreciative
+(From customer messages only)
+1 – Very negative / escalated
+2 – Negative / frustrated
+3 – Neutral
+4 – Positive / cooperative
+5 – Very appreciative
 
 6) AGENT TONE
-1 Rude/unprofessional
-2 Mechanical/not empathetic
-3 Neutral/correct
-4 Warm/polite
-5 Highly empathetic/personalized
+1 – Rude / unprofessional
+2 – Robotic; no empathy
+3 – Neutral / correct
+4 – Warm / polite
+5 – Highly empathetic / personalized
 
-Final Score 1–100:
-weights: Follow-up 15, No Drops 15, SLA 20, Resolution 20, Sentiment 15, Tone 15
-Convert 1–5 to percent: ((score-1)/4)*100.
-final_score = round(sum(percent_i * weight_i / 100))
+Final Score (1–100):
+Each score (1–5) is converted to percent using:
+percent = ((score - 1) / 4) * 100
+
+Weights:
+Follow-up 15
+No Drops 15
+SLA 20
+Resolution Quality 20
+Customer Sentiment 15
+Agent Tone 15
+
+Final Score Formula:
+final_score = round(
+  followup_percent * 0.15 +
+  nodrops_percent * 0.15 +
+  sla_percent * 0.20 +
+  resolution_percent * 0.20 +
+  sentiment_percent * 0.15 +
+  tone_percent * 0.15
+)
+
+Output JSON:
+{
+  "follow_up": <1-5>,
+  "no_drops": <1-5>,
+  "sla": <1-5>,
+  "resolution": <1-5>,
+  "sentiment": <1-5>,
+  "tone": <1-5>,
+  "final_score": <1-100>,
+  "comments": "short reasoning for each score"
+}
 
 CATEGORY/SUBCATEGORY (STRICT):
 Use ONLY exact labels from Reference List (Category -> Subcategory -> Issue Summary).
