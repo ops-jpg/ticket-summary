@@ -15,7 +15,7 @@ const ZOHO_ORG_ID = process.env.ZOHO_ORG_ID;
 
 // Optional thread count custom field label (number field in Desk)
 const THREAD_COUNT_FIELD_LABEL =
-  process.env.THREAD_COUNT_FIELD_LABEL || "Thread Count";
+  process.env.THREAD_COUNT_FIELD_LABEL || "Number of Threads";
 
 // Zoho OAuth
 let DESK_OAUTH_TOKEN = process.env.DESK_OAUTH_TOKEN;
