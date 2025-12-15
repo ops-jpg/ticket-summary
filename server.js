@@ -1045,7 +1045,7 @@ async function updateDeskTicket(ticketId, { aiResult, threadCount, timeSpent }) 
 
   // Thread count into number field
   if (Number.isFinite(Number(threadCount))) {
-    customFields[Number of Threads] = Number(threadCount);
+    customFields[THREAD_COUNT_FIELD_LABEL] = Number(threadCount);
   }
 
   const body = { customFields };
