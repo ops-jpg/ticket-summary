@@ -10,8 +10,24 @@ app.use(express.json({ limit: "2mb" }));
  */
 const DESK_SHARED_SECRET = process.env.DESK_SHARED_SECRET;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
 const ZOHO_ORG_ID = process.env.ZOHO_ORG_ID;
+
+// Exact field labels (match your Desk UI)
+const THREAD_COUNT_FIELD_LABEL =
+  process.env.THREAD_COUNT_FIELD_LABEL || "Number of Threads";
+const OWNER_CHANGE_LOG_LABEL =
+  process.env.OWNER_CHANGE_LOG_LABEL || "Owner Change Log";
+const FINAL_SCORE_FIELD_LABEL =
+  process.env.FINAL_SCORE_FIELD_LABEL || "Final Score";
+const BRIEF_AI_SUMMARY_FIELD_LABEL =
+  process.env.BRIEF_AI_SUMMARY_FIELD_LABEL || "Brief AI Summary";
+const REMARKS_OC_LOG_FIELD_LABEL =
+  process.env.REMARKS_OC_LOG_FIELD_LABEL || "Remarks-OC Log";
+
+// If Zoho numeric fields reject null, set NA_NUMERIC_STRATEGY=zero
+const NA_NUMERIC_STRATEGY = (
+  process.env.NA_NUMERIC_STRATEGY || "null"
+).toLowerCase(); // "null" | "zero"
 
 // Zoho OAuth
 let DESK_OAUTH_TOKEN = process.env.DESK_OAUTH_TOKEN;
@@ -21,57 +37,11 @@ const ZOHO_CLIENT_SECRET = process.env.ZOHO_CLIENT_SECRET;
 const ZOHO_ACCOUNTS_DOMAIN =
   process.env.ZOHO_ACCOUNTS_DOMAIN || "https://accounts.zoho.com";
 
-// If Zoho numeric fields reject null, set NA_NUMERIC_STRATEGY=zero
-const NA_NUMERIC_STRATEGY = (
-  process.env.NA_NUMERIC_STRATEGY || "null"
-).toLowerCase(); // "null" | "zero"
-
 /**
  * =========================
- * CUSTOM FIELD API NAMES (your exact ones)
+ * REFERENCE LIST (UNCHANGED)
  * =========================
- * You confirmed:
- * - cf_number_of_threads
- * - cf_ai_category_explanation (Brief AI Summary)
- * - cf_ts_resolution (Remarks-OC Log)
- * - AI Summary field API name: cf_callback_tracking_json (from screenshot)
- */
-const CF = {
-  AI_CATEGORY: "cf_ai_category_1",
-  AI_SUBCATEGORY: "cf_ai_sub_category",
-  NUMBER_OF_THREADS: "cf_number_of_threads",
-  FINAL_SCORE: "cf_final_score",
-  BRIEF_AI_SUMMARY: "cf_ai_category_explanation", // brief AI summary
-  FOLLOW_UP_STATUS: "cf_follow_up_status",
-  REMARKS_OC_LOG: "cf_ts_resolution", // remarks-oc log
-  ISSUE_SUMMARY: "cf_tech_csm_resolution",
-  AI_SUMMARY_FULL: "cf_callback_tracking_json", // AI Summary field (multiline)
-  TIME_SPENT_PER_USER: "cf_csm_resolution",
-  TIME_SPENT_PER_ROLE: "cf_voip_resolution",
-
-  // score numeric fields
-  FOLLOW_UP_FREQUENCY: "cf_follow_up_frequency",
-  NO_DROPS: "cf_picklist_3",
-  SLA_ADHERENCE: "cf_ai_category",
-  RESOLUTION_QUALITY: "cf_resolution_quality",
-  CUSTOMER_SENTIMENT: "cf_customer_sentiment",
-  AGENT_TONE: "cf_agent_tone",
-
-  // reason fields
-  REASON_FOLLOW_UP_FREQUENCY: "cf_reason_for_disconnection",
-  REASON_NO_DROPS: "cf_cs_resolution",
-  REASON_SLA: "cf_remarks",
-  REASON_RESOLUTION_QUALITY: "cf_reason_resolution_quality",
-  REASON_CUSTOMER_SENTIMENT: "cf_reason_customer_sentiment",
-  REASON_AGENT_TONE: "cf_reason_agent_tone",
-
-  OWNER_CHANGE_LOG: "cf_owner_change_log",
-};
-
-/**
- * =========================
- * REFERENCE LIST (unchanged)
- * =========================
+ * Keep your full reference list exactly as you already have it.
  */
 const REFERENCE_LIST = `
 OS Issue:
@@ -453,10 +423,8 @@ Appointment Issue:
 
 /**
  * =========================
- * PROMPT
+ * PROMPT (NA-aware + full rubric)
  * =========================
- * - returns: scores + category + brief summary + full summary text
- * - category rule improved: website edits must map to Website Edits Issues if keywords appear
  */
 const PROMPT = ({
   subject,
@@ -470,49 +438,92 @@ const PROMPT = ({
   currentOwnerName,
   currentOwnerRole,
 }) => `
-You are an AI Ticket Audit Assistant.
+You are an AI Ticket Audit Assistant. Analyze this Zoho Desk ticket for agent performance using ONLY the provided ticket data.
 
 HARD RULES:
-- Ticket has MULTIPLE threads/messages: evaluate fully.
-- Return VALID JSON ONLY. No markdown. No extra keys outside schema.
+- If there are multiple messages/threads, you MUST evaluate fully.
+- Do NOT say "not enough data" when multiple messages exist.
 - Scores must be integers 1–5 OR "NA". Never output 0.
-- If metric not applicable, output "NA".
-- DO NOT calculate final score (server will).
-- DO NOT calculate time spent (server will).
+- If a metric truly does not apply, output "NA".
+- Do NOT compute time spent, owner time, or final score. Server handles that.
+- Return VALID JSON ONLY (no markdown, no extra text).
 
-CATEGORY/SUBCATEGORY STRICT:
-- Use ONLY exact labels from Reference List.
-- VERY IMPORTANT CATEGORY OVERRIDE:
-  If conversation mentions website/page edit, website not updating, broken link, url change, content update, footer/header edit,
-  then category MUST be "Website Edits Issues" (subcategory either "website Edit" or "website Edits" depending on fit),
-  NOT "General Enquiries".
+SCORING RUBRIC (1–5):
+
+1) FOLLOW-UP FREQUENCY
+NA → Follow-up not expected (pure informational / one-touch)
+1 → No follow-up; customer waited >48h
+2 → Late follow-up; customer chased
+3 → Follow-ups but sometimes delayed
+4 → Timely follow-ups; small delays
+5 → Proactive; consistent; timely
+
+2) NO DROPS
+NA → Only one continuous owner and no evidence of handoff gaps
+1 → Dropped/unassigned long
+2 → Ownership gaps; stalled
+3 → Minor stalls; recovered
+4 → Smooth; tiny gaps
+5 → Perfect continuity
+
+3) SLA ADHERENCE (business hours aware using created/closed + message timestamps)
+NA → SLA not applicable for this ticket type
+1 → First response >4h OR resolution >24h
+2 → First response >1h AND resolution >6h
+3 → First response 30–60m OR resolution 4–6h
+4 → First response <30m; resolution slightly late
+5 → Both within SLA comfortably
+
+4) RESOLUTION QUALITY
+NA → No resolution required (FYI only / no action needed)
+1 → Incorrect/unhelpful
+2 → Partially correct, unclear
+3 → Correct but missing clarity
+4 → Clear and complete
+5 → Exceptional clarity + proactive
+
+5) CUSTOMER SENTIMENT
+NA → No customer response at all
+1 → Very negative/escalated
+2 → Negative/frustrated
+3 → Neutral/unclear
+4 → Positive/cooperative
+5 → Very appreciative
+
+6) AGENT TONE
+NA → No agent response at all
+1 → Rude/unprofessional
+2 → Mechanical/not empathetic
+3 → Neutral/correct
+4 → Warm/polite
+5 → Highly empathetic/personalized
+
+CATEGORY/SUBCATEGORY (STRICT):
+Use ONLY exact labels from the Reference List. Do not invent.
 
 REFERENCE LIST:
 ${REFERENCE_LIST}
 
-SCORING (1–5 or "NA"):
-- follow_up_frequency
-- no_drops
-- sla_adherence
-- resolution_quality
-- customer_sentiment
-- agent_tone
+Ticket timestamps:
+createdTime: ${createdTime || "(missing)"}
+closedTime: ${closedTime || "(missing)"}
+currentOwnerName: ${currentOwnerName || "(missing)"}
+currentOwnerRole: ${currentOwnerRole || "(missing)"}
 
-Return JSON in this exact structure:
+Return JSON ONLY:
 {
   "follow_up_status": "Follow-up Completed|Delayed Follow-up|Missed Follow-up|No Commitment Found",
   "category": "",
   "subcategory": "",
   "issue_summary": "",
   "brief_ai_summary": "",
-  "full_ai_summary": "",
   "scores": {
-    "follow_up_frequency": 1,
-    "no_drops": 1,
-    "sla_adherence": 1,
-    "resolution_quality": 1,
-    "customer_sentiment": 1,
-    "agent_tone": 1
+    "follow_up_frequency": 1|2|3|4|5|"NA",
+    "no_drops": 1|2|3|4|5|"NA",
+    "sla_adherence": 1|2|3|4|5|"NA",
+    "resolution_quality": 1|2|3|4|5|"NA",
+    "customer_sentiment": 1|2|3|4|5|"NA",
+    "agent_tone": 1|2|3|4|5|"NA"
   },
   "score_reasons": {
     "follow_up_frequency": "",
@@ -521,14 +532,9 @@ Return JSON in this exact structure:
     "resolution_quality": "",
     "customer_sentiment": "",
     "agent_tone": ""
-  }
+  },
+  "reasons": ""
 }
-
-Ticket timestamps:
-createdTime: ${createdTime || "(missing)"}
-closedTime: ${closedTime || "(missing)"}
-currentOwnerName: ${currentOwnerName || "(missing)"}
-currentOwnerRole: ${currentOwnerRole || "(missing)"}
 
 Ticket:
 Subject: ${subject}
@@ -536,124 +542,9 @@ Status: ${status}
 Priority: ${priority}
 Channel: ${channel}
 Department: ${department}
-
-Conversation (ALL threads + notes are already merged):
+Conversation:
 ${conversation || "(empty)"}
 `;
-
-/**
- * =========================
- * Helpers
- * =========================
- */
-function cleanName(v) {
-  const s = String(v ?? "").trim();
-  if (!s) return "";
-  if (s.toUpperCase() === "N/A") return "";
-  if (s.toLowerCase() === "na") return "";
-  return s;
-}
-function cleanRole(v) {
-  const s = String(v ?? "").trim();
-  if (!s) return "";
-  if (s.toUpperCase() === "N/A") return "";
-  return s;
-}
-
-function normalizeKey(k) {
-  return String(k || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-// allow "NA" or numeric 1..5
-function normalizeMetric(v) {
-  if (typeof v === "string" && v.trim().toUpperCase() === "NA") return "NA";
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "NA";
-  const r = Math.round(n);
-  return Math.max(1, Math.min(5, r));
-}
-
-function normalizeScores(aiScores) {
-  const out = {
-    follow_up_frequency: "NA",
-    no_drops: "NA",
-    sla_adherence: "NA",
-    resolution_quality: "NA",
-    customer_sentiment: "NA",
-    agent_tone: "NA",
-  };
-
-  if (!aiScores || typeof aiScores !== "object") return out;
-
-  const normalizedInput = {};
-  for (const [k, v] of Object.entries(aiScores)) {
-    normalizedInput[normalizeKey(k)] = v;
-  }
-
-  const map = {
-    follow_up_frequency: ["follow_up_frequency", "followup_frequency", "follow_up_freq"],
-    no_drops: ["no_drops", "nodrops", "no_drop"],
-    sla_adherence: ["sla_adherence", "sla"],
-    resolution_quality: ["resolution_quality", "resolution", "quality"],
-    customer_sentiment: ["customer_sentiment", "sentiment"],
-    agent_tone: ["agent_tone", "tone"],
-  };
-
-  for (const [target, variants] of Object.entries(map)) {
-    for (const v of variants) {
-      const hit = normalizedInput[normalizeKey(v)];
-      if (hit === undefined) continue;
-      out[target] = normalizeMetric(hit);
-      break;
-    }
-  }
-
-  return out;
-}
-
-// NA-aware final score 0..100 (null if all NA)
-function computeFinalScore100(scores) {
-  const weights = {
-    follow_up_frequency: 15,
-    no_drops: 15,
-    sla_adherence: 20,
-    resolution_quality: 20,
-    customer_sentiment: 15,
-    agent_tone: 15,
-  };
-
-  let usedWeight = 0;
-  let total = 0;
-
-  for (const [k, w] of Object.entries(weights)) {
-    const v = scores[k];
-    if (v === "NA") continue;
-    const pct = ((v - 1) / 4) * 100;
-    total += pct * w;
-    usedWeight += w;
-  }
-
-  if (usedWeight === 0) return null;
-  return Math.round(total / usedWeight);
-}
-
-function zohoNumericNA(v) {
-  if (v === "NA") return NA_NUMERIC_STRATEGY === "zero" ? 0 : null;
-  if (v !== null && v !== undefined) return v;
-  return NA_NUMERIC_STRATEGY === "zero" ? 0 : null;
-}
-
-function normalizeFollowUpStatus(raw) {
-  if (!raw) return "No Commitment Found";
-  const s = raw.toString().toLowerCase();
-  if (s.includes("completed")) return "Follow-up Completed";
-  if (s.includes("delayed")) return "Delayed Follow-up";
-  if (s.includes("missed")) return "Missed Follow-up";
-  return "No Commitment Found";
-}
 
 /**
  * =========================
@@ -812,107 +703,395 @@ function getThreadCountFromDeskTicket(deskTicket) {
 
 /**
  * =========================
- * Owner Log + Time Spent
+ * Owner Change Log autofill
  * =========================
- * If owner_change_log is empty => use ticket owner for full duration.
+ * Only write actual owner+role. No placeholders.
  */
-function roundToNearestHalfHour(hours) {
-  return Math.round(hours * 2) / 2;
-}
-function formatHours(h) {
-  return `${roundToNearestHalfHour(h)} hrs`;
-}
-
-function computeTimeSpentFallback({ createdTime, closedTime, ownerName, ownerRole }) {
-  const start = createdTime ? new Date(createdTime) : null;
-  const end = closedTime ? new Date(closedTime) : new Date();
-
-  if (!start || Number.isNaN(start.getTime())) {
-    return { perUserText: "", perRoleText: "", remarksText: "" };
-  }
-
-  const endTime = Number.isNaN(end.getTime()) ? new Date() : end;
-  const ms = endTime.getTime() - start.getTime();
-  const hrs = ms > 0 ? ms / (1000 * 60 * 60) : 0;
-
-  const u = cleanName(ownerName);
-  const r = cleanRole(ownerRole) || "Agent";
-
-  if (!u) return { perUserText: "", perRoleText: "", remarksText: "" };
-
-  return {
-    perUserText: `${u} - ${formatHours(hrs)}`,
-    perRoleText: `${r} - ${formatHours(hrs)}`,
-    remarksText: `Owner Change Log empty → time calculated using current assignee (${u}) from createdTime to closedTime/now.`,
-  };
+function buildOwnerLogWhenEmpty({ currentOwnerName, currentOwnerRole }) {
+  const owner = (currentOwnerName || "").trim();
+  if (!owner) return "";
+  const role = (currentOwnerRole || "Agent").trim();
+  return `Owner: ${owner}\nRole: ${role}`;
 }
 
 /**
  * =========================
- * Update Zoho Desk ticket
+ * NA-aware scoring utilities
+ * =========================
+ */
+function normalizeKey(k) {
+  return String(k || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function clampScore15(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 3; // neutral fallback if LLM misbehaves
+  const r = Math.round(n);
+  return Math.max(1, Math.min(5, r));
+}
+
+function normalizeScores(aiScores) {
+  const out = {
+    follow_up_frequency: 3,
+    no_drops: 3,
+    sla_adherence: 3,
+    resolution_quality: 3,
+    customer_sentiment: 3,
+    agent_tone: 3,
+  };
+
+  if (!aiScores || typeof aiScores !== "object") return out;
+
+  const normalizedInput = {};
+  for (const [k, v] of Object.entries(aiScores)) {
+    normalizedInput[normalizeKey(k)] = v;
+  }
+
+  const map = {
+    follow_up_frequency: ["follow_up_frequency", "followup_frequency", "follow_up_freq"],
+    no_drops: ["no_drops", "nodrops", "no_drop"],
+    sla_adherence: ["sla_adherence", "sla", "sla_score"],
+    resolution_quality: ["resolution_quality", "resolution", "quality"],
+    customer_sentiment: ["customer_sentiment", "sentiment"],
+    agent_tone: ["agent_tone", "tone"],
+  };
+
+  for (const [target, variants] of Object.entries(map)) {
+    for (const v of variants) {
+      const hit = normalizedInput[normalizeKey(v)];
+      if (hit === undefined) continue;
+
+      if (typeof hit === "string" && hit.trim().toUpperCase() === "NA") {
+        out[target] = "NA";
+        break;
+      }
+
+      if (hit !== null && hit !== "") {
+        out[target] = clampScore15(hit);
+        break;
+      }
+    }
+  }
+
+  return out;
+}
+
+function computeFinalScore100(scores) {
+  const weights = {
+    follow_up_frequency: 15,
+    no_drops: 15,
+    sla_adherence: 20,
+    resolution_quality: 20,
+    customer_sentiment: 15,
+    agent_tone: 15,
+  };
+
+  let usedWeight = 0;
+  let total = 0;
+
+  for (const [k, w] of Object.entries(weights)) {
+    const v = scores[k];
+    if (v === "NA") continue;
+    const pct = ((v - 1) / 4) * 100;
+    total += pct * w;
+    usedWeight += w;
+  }
+
+  if (usedWeight === 0) return null; // all NA
+  return Math.round(total / usedWeight);
+}
+
+function zohoNumericNA(v) {
+  if (v === "NA") return NA_NUMERIC_STRATEGY === "zero" ? 0 : null;
+  if (v !== null && v !== undefined) return v;
+  return NA_NUMERIC_STRATEGY === "zero" ? 0 : null;
+}
+
+/**
+ * =========================
+ * Owner log parsing + time spent calculation
+ * =========================
+ * Supports:
+ * - "Owner changed to Atlas Davis on 2025-12-15 14:06:14 Role :RCM Support"
+ * - ISO formats with Owner:/Role:
+ * - Block formats
+ */
+function parseOwnerChangeLog(ownerChangeLogText) {
+  const text = String(ownerChangeLogText || "").trim();
+  if (!text) return [];
+
+  const events = [];
+
+  // Pattern A: Owner changed to X on YYYY-MM-DD HH:MM:SS Role :Y
+  // Also handles Role: or Role : or Role - etc.
+  const reA =
+    /Owner\s+changed\s+to\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:\s+Role\s*[:\-]\s*(.+))?/gi;
+
+  let m;
+  while ((m = reA.exec(text)) !== null) {
+    const owner = (m[1] || "").trim();
+    const datePart = (m[2] || "").trim();
+    const timePart = (m[3] || "").trim();
+    const role = (m[4] || "").trim();
+
+    const dt = new Date(`${datePart}T${timePart}Z`);
+    if (owner && !Number.isNaN(dt.getTime())) {
+      events.push({ time: dt, owner, role });
+    }
+  }
+
+  // Pattern B: Block format Owner:/Role:/From:
+  if (!events.length) {
+    const blocks = text.split(/(?:\n\s*\n)+/g);
+    for (const b of blocks) {
+      const owner = (b.match(/Owner:\s*(.+)/i)?.[1] || "").trim();
+      const role = (b.match(/Role:\s*(.+)/i)?.[1] || "").trim();
+      const from = (b.match(/From:\s*([0-9T:\-\.Z]+)/i)?.[1] || "").trim();
+      if (owner && from) {
+        const d = new Date(from);
+        if (!Number.isNaN(d.getTime())) {
+          events.push({ time: d, owner, role: role || "" });
+        }
+      }
+    }
+  }
+
+  // Pattern C: ISO lines
+  if (!events.length) {
+    const lines = text.split("\n").map((x) => x.trim()).filter(Boolean);
+    for (const line of lines) {
+      const iso = line.match(
+        /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/
+      )?.[1];
+      if (!iso) continue;
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) continue;
+
+      const owner =
+        (line.match(/Owner:\s*([^|]+?)(?:\||$)/i)?.[1] ||
+          line.match(/Assignee:\s*([^|]+?)(?:\||$)/i)?.[1] ||
+          "").trim();
+
+      const role = (line.match(/Role:\s*([^|]+?)(?:\||$)/i)?.[1] || "").trim();
+      if (owner) events.push({ time: d, owner, role });
+    }
+  }
+
+  events.sort((a, b) => a.time - b.time);
+  return events;
+}
+
+function roundToNearestHalfHour(hours) {
+  return Math.round(hours * 2) / 2;
+}
+
+function formatHours(h) {
+  return `${roundToNearestHalfHour(h)} hrs`;
+}
+
+/**
+ * Time spent per user = time ticket stayed assigned to that owner.
+ * - Segment 1: createdTime -> first owner-change time belongs to initial owner (fallbackOwnerName)
+ * - Segment i: event[i].time -> event[i+1].time belongs to event[i].owner
+ * - Final: lastEvent.time -> closedTime/now belongs to lastEvent.owner
+ */
+function calculateTimeSpentPerUserAndRole({
+  ownerChangeLog,
+  createdTime,
+  closedTime,
+  fallbackOwnerName,
+  fallbackOwnerRole,
+}) {
+  const start = createdTime ? new Date(createdTime) : null;
+  if (!start || Number.isNaN(start.getTime())) {
+    return { perUserText: "", perRoleText: "", ownerTimeSummary: "" };
+  }
+
+  const end = closedTime ? new Date(closedTime) : new Date();
+  const endTime = Number.isNaN(end.getTime()) ? new Date() : end;
+
+  const events = parseOwnerChangeLog(ownerChangeLog);
+
+  const timeline = [];
+
+  // If no owner-change events, whole duration belongs to fallback owner
+  if (!events.length) {
+    const owner = (fallbackOwnerName || "").trim();
+    if (!owner) return { perUserText: "", perRoleText: "", ownerTimeSummary: "" };
+
+    timeline.push({
+      owner,
+      role: (fallbackOwnerRole || "Agent").trim(),
+      from: start,
+      to: endTime,
+    });
+  } else {
+    // Segment 0: created -> first event time (initial owner)
+    const initialOwner = (fallbackOwnerName || "").trim();
+    const initialRole = (fallbackOwnerRole || "Agent").trim();
+    const firstTime = events[0].time;
+
+    if (initialOwner && firstTime > start) {
+      timeline.push({
+        owner: initialOwner,
+        role: initialRole,
+        from: start,
+        to: firstTime,
+      });
+    }
+
+    // Event segments: event[i] -> event[i+1]
+    for (let i = 0; i < events.length; i++) {
+      const e = events[i];
+      const next = events[i + 1];
+      const from = e.time;
+      const to = next ? next.time : endTime;
+      if (to <= from) continue;
+
+      timeline.push({
+        owner: e.owner,
+        role: (e.role || "").trim() || "Agent",
+        from,
+        to,
+      });
+    }
+  }
+
+  const perUser = new Map();
+  const perRole = new Map();
+
+  for (const seg of timeline) {
+    const ms = seg.to.getTime() - seg.from.getTime();
+    if (ms <= 0) continue;
+    const hrs = ms / (1000 * 60 * 60);
+
+    perUser.set(seg.owner, (perUser.get(seg.owner) || 0) + hrs);
+    perRole.set(seg.role, (perRole.get(seg.role) || 0) + hrs);
+  }
+
+  const perUserText = [...perUser.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, hrs]) => `${name} - ${formatHours(hrs)}`)
+    .join("\n");
+
+  const perRoleText = [...perRole.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([role, hrs]) => `${role} - ${formatHours(hrs)}`)
+    .join("\n");
+
+  const topOwner = [...perUser.entries()].sort((a, b) => b[1] - a[1])[0];
+
+  const ownerTimeSummary = topOwner
+    ? `Most time spent with ${topOwner[0]} (${formatHours(topOwner[1])}).`
+    : "";
+
+  return { perUserText, perRoleText, ownerTimeSummary };
+}
+
+/**
+ * =========================
+ * Follow-up mapping
+ * =========================
+ */
+function normalizeFollowUpStatus(raw) {
+  if (!raw) return "No Commitment Found";
+  const s = raw.toString().toLowerCase();
+  if (s.includes("completed")) return "Follow-up Completed";
+  if (s.includes("delayed")) return "Delayed Follow-up";
+  if (s.includes("missed")) return "Missed Follow-up";
+  return "No Commitment Found";
+}
+
+/**
+ * =========================
+ * Desk writeback
  * =========================
  */
 async function updateDeskTicket(ticketId, { aiResult, threadCount, timeSpent }) {
   const scores = normalizeScores(aiResult?.scores);
   const scoreReasons = aiResult?.score_reasons || {};
+
   const finalScore100 = computeFinalScore100(scores);
 
   const reasonOrNA = (key) => {
-    const base = String(scoreReasons?.[key] || "").trim();
+    const base = (scoreReasons?.[key] || "").trim();
     if (scores[key] === "NA") return base ? `NA - ${base}` : "NA - Not applicable";
     return base;
   };
 
-  // Full AI summary goes to AI Summary field (cf_callback_tracking_json)
-  const fullAiSummary = String(aiResult?.full_ai_summary || "").trim();
-  const briefAiSummary = String(aiResult?.brief_ai_summary || "").trim();
+  const brief =
+    (aiResult?.brief_ai_summary || "").trim() ||
+    (aiResult?.reasons || "").trim().split("\n")[0].slice(0, 220);
+
+  const remarksOc =
+    (timeSpent?.ownerTimeSummary || "").trim() ||
+    "";
 
   const customFields = {
-    [CF.AI_CATEGORY]: aiResult?.category || "",
-    [CF.AI_SUBCATEGORY]: aiResult?.subcategory || "",
-    [CF.ISSUE_SUMMARY]: aiResult?.issue_summary || "",
+    // Score breakdown (your existing field labels)
+    "Follow-Up Frequency": zohoNumericNA(scores.follow_up_frequency),
+    "No Drops Score": zohoNumericNA(scores.no_drops),
+    "SLA Adherence": zohoNumericNA(scores.sla_adherence),
+    "Resolution Quality": zohoNumericNA(scores.resolution_quality),
+    "Customer Sentiment": zohoNumericNA(scores.customer_sentiment),
+    "Agent Tone": zohoNumericNA(scores.agent_tone),
 
-    [CF.FOLLOW_UP_STATUS]: normalizeFollowUpStatus(aiResult?.follow_up_status),
+    "Reason Follow-Up Frequency": reasonOrNA("follow_up_frequency"),
+    "Reason No Drops": reasonOrNA("no_drops"),
+    "Reasons SLA Adherence": reasonOrNA("sla_adherence"),
+    "Reason Resolution Quality": reasonOrNA("resolution_quality"),
+    "Reason Customer Sentiment": reasonOrNA("customer_sentiment"),
+    "Reason Agent Tone": reasonOrNA("agent_tone"),
 
-    // number of threads
-    [CF.NUMBER_OF_THREADS]: Number.isFinite(Number(threadCount)) ? Number(threadCount) : null,
+    // Status + classification
+    "Follow-up Status": normalizeFollowUpStatus(aiResult?.follow_up_status),
+    "AI Category": aiResult?.category || "",
+    "AI Sub Category": aiResult?.subcategory || "",
+    "Issue Summary": aiResult?.issue_summary || "",
 
-    // full + brief summaries
-    [CF.BRIEF_AI_SUMMARY]: briefAiSummary,      // brief summary field
-    [CF.AI_SUMMARY_FULL]: fullAiSummary,        // AI Summary field (multiline)
+    // Final score field (exact label from your screenshot)
+    [FINAL_SCORE_FIELD_LABEL]: finalScore100,
 
-    // time spent fields
-    [CF.TIME_SPENT_PER_USER]: timeSpent?.perUserText || "",
-    [CF.TIME_SPENT_PER_ROLE]: timeSpent?.perRoleText || "",
-    [CF.REMARKS_OC_LOG]: timeSpent?.remarksText || "",
+    // Brief AI Summary field (exact label from your screenshot)
+    [BRIEF_AI_SUMMARY_FIELD_LABEL]: brief,
 
-    // final score
-    [CF.FINAL_SCORE]: finalScore100,
+    // Remarks-OC Log field (exact label from your screenshot)
+    [REMARKS_OC_LOG_FIELD_LABEL]: remarksOc,
 
-    // metric scores
-    [CF.FOLLOW_UP_FREQUENCY]: zohoNumericNA(scores.follow_up_frequency),
-    [CF.NO_DROPS]: zohoNumericNA(scores.no_drops),
-    [CF.SLA_ADHERENCE]: zohoNumericNA(scores.sla_adherence),
-    [CF.RESOLUTION_QUALITY]: zohoNumericNA(scores.resolution_quality),
-    [CF.CUSTOMER_SENTIMENT]: zohoNumericNA(scores.customer_sentiment),
-    [CF.AGENT_TONE]: zohoNumericNA(scores.agent_tone),
-
-    // metric reasons
-    [CF.REASON_FOLLOW_UP_FREQUENCY]: reasonOrNA("follow_up_frequency"),
-    [CF.REASON_NO_DROPS]: reasonOrNA("no_drops"),
-    [CF.REASON_SLA]: reasonOrNA("sla_adherence"),
-    [CF.REASON_RESOLUTION_QUALITY]: reasonOrNA("resolution_quality"),
-    [CF.REASON_CUSTOMER_SENTIMENT]: reasonOrNA("customer_sentiment"),
-    [CF.REASON_AGENT_TONE]: reasonOrNA("agent_tone"),
+    // Time spent
+    "Time Spent Per User": timeSpent?.perUserText || "",
+    "Time Spent Per Role": timeSpent?.perRoleText || "",
   };
 
+  // Thread count number field (exact label)
+  if (Number.isFinite(Number(threadCount))) {
+    customFields[THREAD_COUNT_FIELD_LABEL] = Number(threadCount);
+  }
+
   const body = { customFields };
+  console.log("Desk update payload:", JSON.stringify(body).slice(0, 1600));
 
-  console.log("Desk update payload:", JSON.stringify(body).slice(0, 1800));
   const result = await deskPatchTicket(ticketId, body);
-  console.log("Desk update response:", result.status, JSON.stringify(result.data).slice(0, 900));
-
+  console.log("Desk update response:", result.status, JSON.stringify(result.data).slice(0, 1200));
   return result;
+}
+
+async function updateOwnerChangeLogOnly(ticketId, ownerLogText) {
+  if (!ticketId || !ownerLogText) return { skipped: true };
+  const body = { customFields: { [OWNER_CHANGE_LOG_LABEL]: ownerLogText } };
+  console.log("Owner Change Log payload:", JSON.stringify(body));
+  return await deskPatchTicket(ticketId, body);
+}
+
+async function updateThreadCountOnly(ticketId, threadCount) {
+  if (!ticketId) return { skipped: true };
+  if (!Number.isFinite(Number(threadCount))) return { skipped: true };
+  const body = { customFields: { [THREAD_COUNT_FIELD_LABEL]: Number(threadCount) } };
+  console.log("ThreadCount payload:", JSON.stringify(body));
+  return await deskPatchTicket(ticketId, body);
 }
 
 /**
@@ -940,6 +1119,7 @@ app.post("/desk-webhook", async (req, res) => {
 
     const body = req.body || {};
 
+    // Payload fields (support both Deluge names and direct names)
     let {
       ticket_id,
       subject = "N/A",
@@ -966,6 +1146,9 @@ app.post("/desk-webhook", async (req, res) => {
     closedTime = closedTime || ticket_closed_time || "";
     currentOwnerName = currentOwnerName || ticket_owner || "";
 
+    console.log("Webhook hit:", JSON.stringify({ ticket_id, subject }).slice(0, 600));
+    console.log("Conversation length:", (conversation || "").length);
+
     // Enrich from Desk (source of truth)
     let deskTicket = null;
     if (ticket_id) {
@@ -989,40 +1172,41 @@ app.post("/desk-webhook", async (req, res) => {
       currentOwnerRole = currentOwnerRole || assignee?.roleName || assignee?.role || "Agent";
     }
 
-    // ✅ Normalize so "N/A" doesn't become a real name
-    currentOwnerName = cleanName(currentOwnerName);
-    currentOwnerRole = cleanRole(currentOwnerRole) || "Agent";
-
-    // Thread count
+    // Thread count from Zoho (authoritative)
     const threadCount = getThreadCountFromDeskTicket(deskTicket);
 
-    // ✅ Skip if <= 1 thread
+    // Always update thread count field if we have it
+    if (ticket_id && Number.isFinite(threadCount)) {
+      await updateThreadCountOnly(ticket_id, threadCount);
+    }
+
+    // Owner Change Log autofill if empty (ONLY actual owner+role)
+    const ownerLogEmpty = !owner_change_log || !String(owner_change_log).trim();
+    if (ownerLogEmpty && ticket_id) {
+      const ownerLogText = buildOwnerLogWhenEmpty({
+        currentOwnerName,
+        currentOwnerRole,
+      });
+      if (ownerLogText) {
+        await updateOwnerChangeLogOnly(ticket_id, ownerLogText);
+        owner_change_log = ownerLogText;
+      }
+    }
+
+    // If <= 1 thread, do NOT run AI or update scoring fields
     if (Number.isFinite(threadCount) && threadCount <= 1) {
+      console.log("Skipping AI scoring (threadCount <= 1):", ticket_id, threadCount);
       return res.json({ ok: true, skipped: true, reason: "threadCount<=1", threadCount });
     }
 
-    // ✅ Time spent fallback: if owner_change_log empty, use owner full duration
-    const ownerLogEmpty = !owner_change_log || !String(owner_change_log).trim();
-    let timeSpent;
-    if (ownerLogEmpty) {
-      timeSpent = computeTimeSpentFallback({
-        createdTime,
-        closedTime,
-        ownerName: currentOwnerName,
-        ownerRole: currentOwnerRole,
-      });
-    } else {
-      // (If you later implement real parsing, plug it here.)
-      // For now: still fallback to owner full duration but explain log exists
-      timeSpent = computeTimeSpentFallback({
-        createdTime,
-        closedTime,
-        ownerName: currentOwnerName,
-        ownerRole: currentOwnerRole,
-      });
-      timeSpent.remarksText =
-        "Owner Change Log present but not parsed → fallback used current assignee duration.";
-    }
+    // Compute time spent from owner_change_log + created/closed + fallback owner
+    const timeSpent = calculateTimeSpentPerUserAndRole({
+      ownerChangeLog: owner_change_log,
+      createdTime,
+      closedTime,
+      fallbackOwnerName: currentOwnerName,
+      fallbackOwnerRole: currentOwnerRole,
+    });
 
     // Call AI
     const prompt = PROMPT({
@@ -1040,24 +1224,24 @@ app.post("/desk-webhook", async (req, res) => {
 
     const ai = await callOpenAI(prompt);
 
-    // Normalize scores + compute final score server-side
+    // Normalize scores (handle NA + key mismatches)
     ai.scores = normalizeScores(ai?.scores);
-    ai.final_score = computeFinalScore100(ai.scores);
 
-    // If AI didn't provide summaries, generate minimal ones from conversation
-    if (!ai.brief_ai_summary) {
-      ai.brief_ai_summary = String(conversation || "").slice(0, 300);
-    }
-    if (!ai.full_ai_summary) {
-      ai.full_ai_summary = String(conversation || "");
-    }
+    // Final score server-side (NA-aware)
+    ai.final_score = computeFinalScore100(ai.scores);
 
     // Write back to Desk
     const deskResult = ticket_id
       ? await updateDeskTicket(ticket_id, { aiResult: ai, threadCount, timeSpent })
       : { skipped: true };
 
-    return res.json({ ok: true, threadCount, ai, timeSpent, desk: deskResult });
+    return res.json({
+      ok: true,
+      threadCount,
+      ai,
+      timeSpent,
+      desk: deskResult,
+    });
   } catch (err) {
     console.error("Webhook error:", err);
     return res.status(500).json({ ok: false, error: err.message || "Unknown error" });
