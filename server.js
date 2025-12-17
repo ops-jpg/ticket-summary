@@ -828,28 +828,45 @@ function buildOwnerLogWhenEmpty({ currentOwnerName, currentOwnerRole }) {
  * Owner log parsing + time spent
  * =========================
  */
+/**
+ * =========================
+ * Owner log parsing + time spent calculation (FIXED)
+ * =========================
+ * Handles ONE-LINE logs like:
+ * "Owner changed to A on 2025-12-15 14:06:14 Role :RCM Support | Owner changed to B on 2025-12-16 09:10:00 Role: Agent"
+ *
+ * Captures multiple entries even when separated by:
+ * - " | "  ","  ";"  newline (but your Deluge removes newlines)
+ */
 function parseOwnerChangeLog(ownerChangeLogText) {
   const text = String(ownerChangeLogText || "").trim();
   if (!text) return [];
 
   const events = [];
 
-  const reA =
-    /Owner\s+changed\s+to\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:\s+Role\s*[:\-]\s*(.+?))?(?=\s*Owner\s+changed\s+to|\s*$)/gi;
+  // Capture each "Owner changed to <name> on <date> <time> ... (until next Owner changed to / end)"
+  const re =
+    /Owner\s+changed\s+to\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})([\s\S]*?)(?=Owner\s+changed\s+to|\s*$)/gi;
 
   let m;
-  while ((m = reA.exec(text)) !== null) {
+  while ((m = re.exec(text)) !== null) {
     const owner = (m[1] || "").trim();
     const datePart = (m[2] || "").trim();
     const timePart = (m[3] || "").trim();
-    const role = (m[4] || "").trim();
+    const tail = (m[4] || "").trim();
+
+    // Role can appear as: "Role :X" or "Role: X" or "Role - X"
+    const role =
+      (tail.match(/Role\s*[:\-]\s*([^|,;]+)\s*/i)?.[1] || "").trim();
+
+    // Do NOT force UTC; we just need consistent ordering/deltas
     const dt = new Date(`${datePart}T${timePart}`);
     if (owner && !Number.isNaN(dt.getTime())) {
       events.push({ time: dt, owner, role });
     }
   }
 
-  // fallback patterns unchanged (block + ISO)
+  // Fallback: Block format "Owner: ... Role: ... From: ..."
   if (!events.length) {
     const blocks = text.split(/(?:\n\s*\n)+/g);
     for (const b of blocks) {
@@ -863,36 +880,42 @@ function parseOwnerChangeLog(ownerChangeLogText) {
     }
   }
 
-  if (!events.length) {
-    const lines = text.split("\n").map((x) => x.trim()).filter(Boolean);
-    for (const line of lines) {
-      const iso = line.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/)?.[1];
-      if (!iso) continue;
-      const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) continue;
-
-      const owner =
-        (line.match(/Owner:\s*([^|]+?)(?:\||$)/i)?.[1] ||
-          line.match(/Assignee:\s*([^|]+?)(?:\||$)/i)?.[1] ||
-          "").trim();
-      const role = (line.match(/Role:\s*([^|]+?)(?:\||$)/i)?.[1] || "").trim();
-      if (owner) events.push({ time: d, owner, role });
-    }
-  }
-
+  // De-dupe + sort
   events.sort((a, b) => a.time - b.time);
-  const dedup = [];
+  const out = [];
   const seen = new Set();
   for (const e of events) {
     const key = `${e.owner}__${e.time.getTime()}__${e.role || ""}`;
     if (!seen.has(key)) {
       seen.add(key);
-      dedup.push(e);
+      out.push(e);
     }
   }
-  return dedup;
+  return out;
 }
 
+function roundToNearestHalfHour(hours) {
+  return Math.round(hours * 2) / 2;
+}
+function formatHours(h) {
+  return `${roundToNearestHalfHour(h)} hrs`;
+}
+
+function isMeaningfulName(name) {
+  const s = String(name || "").trim();
+  if (!s) return false;
+  const low = s.toLowerCase();
+  return low !== "n/a" && low !== "na" && low !== "null" && low !== "undefined";
+}
+
+/**
+ * Time spent per user = time ticket stayed assigned to that owner.
+ * - If owner_change_log is empty -> whole duration belongs to fallbackOwnerName (ticket owner/current assignee)
+ * - If owner_change_log has events:
+ *   segment 0: createdTime -> firstEvent.time belongs to fallbackOwnerName (best available)
+ *   segment i: event[i].time -> event[i+1].time belongs to event[i].owner
+ *   last: lastEvent.time -> closedTime/now belongs to lastEvent.owner
+ */
 function calculateTimeSpentPerUserAndRole({
   ownerChangeLog,
   createdTime,
@@ -918,12 +941,12 @@ function calculateTimeSpentPerUserAndRole({
 
   const timeline = [];
 
-  // If no events, FULL ticket duration belongs to current assignee (fallback)
+  // No events -> whole duration is with fallback owner
   if (!events.length) {
     if (!safeOwner) return { perUserText: "", perRoleText: "", ownerTimeSummary: "" };
     timeline.push({ owner: safeOwner, role: safeRole, from: start, to: endTime });
   } else {
-    // created -> first event belongs to fallback owner (if known)
+    // created -> first event belongs to fallback owner (best available)
     if (safeOwner && events[0].time > start) {
       timeline.push({ owner: safeOwner, role: safeRole, from: start, to: events[0].time });
     }
@@ -935,6 +958,7 @@ function calculateTimeSpentPerUserAndRole({
       const from = e.time < start ? start : e.time;
       const to = next ? next.time : endTime;
       if (to <= from) continue;
+
       timeline.push({
         owner: e.owner,
         role: (e.role || "").trim() || "Agent",
@@ -946,10 +970,12 @@ function calculateTimeSpentPerUserAndRole({
 
   const perUser = new Map();
   const perRole = new Map();
+
   for (const seg of timeline) {
     const ms = seg.to.getTime() - seg.from.getTime();
     if (ms <= 0) continue;
     const hrs = ms / (1000 * 60 * 60);
+
     perUser.set(seg.owner, (perUser.get(seg.owner) || 0) + hrs);
     perRole.set(seg.role, (perRole.get(seg.role) || 0) + hrs);
   }
@@ -964,13 +990,13 @@ function calculateTimeSpentPerUserAndRole({
     .map(([role, hrs]) => `${role} - ${formatHours(hrs)}`)
     .join("\n");
 
-  const topOwner = [...perUser.entries()].sort((a, b) => b[1] - a[1])[0];
-  const ownerTimeSummary = topOwner
+  const ownerTimeSummary = perUserText
     ? `Owner time split: ${perUserText.replace(/\n/g, " | ")}`
     : "";
 
   return { perUserText, perRoleText, ownerTimeSummary };
 }
+
 
 /**
  * =========================
