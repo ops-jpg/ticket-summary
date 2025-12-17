@@ -23,6 +23,9 @@ const BRIEF_AI_SUMMARY_FIELD_LABEL =
   process.env.BRIEF_AI_SUMMARY_FIELD_LABEL || "Brief AI Summary";
 const REMARKS_OC_LOG_FIELD_LABEL =
   process.env.REMARKS_OC_LOG_FIELD_LABEL || "Remarks-OC Log";
+const AI_SUMMARY_FIELD_LABEL =
+  process.env.AI_SUMMARY_FIELD_LABEL || "AI Summary";
+
 
 // If Zoho numeric fields reject null, set NA_NUMERIC_STRATEGY=zero
 const NA_NUMERIC_STRATEGY = (
@@ -825,10 +828,11 @@ function parseOwnerChangeLog(ownerChangeLogText) {
 
   const events = [];
 
-  // Pattern A: Owner changed to X on YYYY-MM-DD HH:MM:SS Role :Y
-  // Also handles Role: or Role : or Role - etc.
+  // Pattern A (FIXED):
+  // "Owner changed to Atlas Davis on 2025-12-15 14:06:14 Role :RCM Support"
+  // The role capture now stops before the NEXT "Owner changed to" (or end of string).
   const reA =
-    /Owner\s+changed\s+to\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:\s+Role\s*[:\-]\s*(.+))?/gi;
+    /Owner\s+changed\s+to\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:\s+Role\s*[:\-]\s*(.+?))?(?=\s*Owner\s+changed\s+to|\s*$)/gi;
 
   let m;
   while ((m = reA.exec(text)) !== null) {
@@ -837,7 +841,9 @@ function parseOwnerChangeLog(ownerChangeLogText) {
     const timePart = (m[3] || "").trim();
     const role = (m[4] || "").trim();
 
-    const dt = new Date(`${datePart}T${timePart}Z`);
+    // NOTE: do NOT append "Z" unless you're 100% sure it's UTC.
+    // For duration math, timezone choice doesn't matter as long as consistent.
+    const dt = new Date(`${datePart}T${timePart}`);
     if (owner && !Number.isNaN(dt.getTime())) {
       events.push({ time: dt, owner, role });
     }
@@ -863,10 +869,9 @@ function parseOwnerChangeLog(ownerChangeLogText) {
   if (!events.length) {
     const lines = text.split("\n").map((x) => x.trim()).filter(Boolean);
     for (const line of lines) {
-      const iso = line.match(
-        /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/
-      )?.[1];
+      const iso = line.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/)?.[1];
       if (!iso) continue;
+
       const d = new Date(iso);
       if (Number.isNaN(d.getTime())) continue;
 
@@ -880,16 +885,18 @@ function parseOwnerChangeLog(ownerChangeLogText) {
     }
   }
 
+  // Sort + de-dup (same owner+time repeats happen)
   events.sort((a, b) => a.time - b.time);
-  return events;
-}
-
-function roundToNearestHalfHour(hours) {
-  return Math.round(hours * 2) / 2;
-}
-
-function formatHours(h) {
-  return `${roundToNearestHalfHour(h)} hrs`;
+  const dedup = [];
+  const seen = new Set();
+  for (const e of events) {
+    const key = `${e.owner}__${e.time.getTime()}__${e.role || ""}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      dedup.push(e);
+    }
+  }
+  return dedup;
 }
 
 /**
@@ -912,12 +919,16 @@ function calculateTimeSpentPerUserAndRole({
 
   const end = closedTime ? new Date(closedTime) : new Date();
   const endTime = Number.isNaN(end.getTime()) ? new Date() : end;
+  const eventsAll = parseOwnerChangeLog(ownerChangeLog);
 
-  const events = parseOwnerChangeLog(ownerChangeLog);
+  // Keep only events inside the ticket window (created -> closed/now),
+  // and keep them sorted.
+  const events = eventsAll
+    .filter(e => e.time && e.time >= start && e.time <= endTime)
+    .sort((a, b) => a.time - b.time);
 
   const timeline = [];
 
-  // If no owner-change events, whole duration belongs to fallback owner
   if (!events.length) {
     const owner = (fallbackOwnerName || "").trim();
     if (!owner) return { perUserText: "", perRoleText: "", ownerTimeSummary: "" };
@@ -929,25 +940,23 @@ function calculateTimeSpentPerUserAndRole({
       to: endTime,
     });
   } else {
-    // Segment 0: created -> first event time (initial owner)
+    // Segment 0: created -> first event (initial owner)
     const initialOwner = (fallbackOwnerName || "").trim();
     const initialRole = (fallbackOwnerRole || "Agent").trim();
-    const firstTime = events[0].time;
-
-    if (initialOwner && firstTime > start) {
+    if (initialOwner && events[0].time > start) {
       timeline.push({
         owner: initialOwner,
         role: initialRole,
         from: start,
-        to: firstTime,
+        to: events[0].time,
       });
     }
 
-    // Event segments: event[i] -> event[i+1]
+    // event[i] -> event[i+1]
     for (let i = 0; i < events.length; i++) {
       const e = events[i];
       const next = events[i + 1];
-      const from = e.time;
+      const from = e.time < start ? start : e.time;
       const to = next ? next.time : endTime;
       if (to <= from) continue;
 
@@ -959,6 +968,7 @@ function calculateTimeSpentPerUserAndRole({
       });
     }
   }
+
 
   const perUser = new Map();
   const perRole = new Map();
@@ -1060,6 +1070,9 @@ async function updateDeskTicket(ticketId, { aiResult, threadCount, timeSpent }) 
 
     // Remarks-OC Log field (exact label from your screenshot)
     [REMARKS_OC_LOG_FIELD_LABEL]: remarksOc,
+
+    //AI SUMMARY Log field (exact label from your screenshot)
+    [AI_SUMMARY_FIELD_LABEL]: aisummary,
 
     // Time spent
     "Time Spent Per User": timeSpent?.perUserText || "",
