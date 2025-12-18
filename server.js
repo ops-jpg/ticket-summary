@@ -53,7 +53,7 @@ const ZOHO_ACCOUNTS_DOMAIN =
  * If env is empty, you can paste your big list in DEFAULT_REFERENCE_LIST.
  */
 const DEFAULT_REFERENCE_LIST = `
-const REFERENCE_LIST = `
+
 OS Issue:
 - Mapping: OS mapping mismatch vs EHR
 - Configuration: OS setup/config needed
