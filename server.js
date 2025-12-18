@@ -670,11 +670,14 @@ function getThreadCountFromDeskTicket(deskTicket) {
     deskTicket?.threadCount ??
     deskTicket?.thread_count ??
     deskTicket?.threadcount ??
-    null;
+    undefined;
+
+  if (tc === undefined || tc === null || tc === "") return null;
 
   const n = Number(tc);
   return Number.isFinite(n) ? n : null;
 }
+
 
 function buildOwnerLogWhenEmpty({ currentOwnerName, currentOwnerRole }) {
   const owner = (currentOwnerName || "").trim();
