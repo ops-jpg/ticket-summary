@@ -469,6 +469,57 @@ LLM RAW SUGGESTIONS (NOT STRICT):
 - llm_category and llm_subcategory can be free-text best guess.
 - Used only to populate "AI Category by LLM" fields.
 
+SCORING RUBRIC (1–5):
+
+1) FOLLOW-UP FREQUENCY
+NA → Follow-up not expected (pure informational / one-touch)
+1 → No follow-up; customer waited >48h
+2 → Late follow-up; customer chased
+3 → Follow-ups but sometimes delayed
+4 → Timely follow-ups; small delays
+5 → Proactive; consistent; timely
+
+2) NO DROPS
+NA → Only one continuous owner and no evidence of handoff gaps
+1 → Dropped/unassigned long
+2 → Ownership gaps; stalled
+3 → Minor stalls; recovered
+4 → Smooth; tiny gaps
+5 → Perfect continuity
+
+3) SLA ADHERENCE (business hours aware using created/closed + message timestamps)
+NA → SLA not applicable for this ticket type
+1 → First response >4h OR resolution >24h
+2 → First response >1h AND resolution >6h
+3 → First response 30–60m OR resolution 4–6h
+4 → First response <30m; resolution slightly late
+5 → Both within SLA comfortably
+
+4) RESOLUTION QUALITY
+NA → No resolution required (FYI only / no action needed)
+1 → Incorrect/unhelpful
+2 → Partially correct, unclear
+3 → Correct but missing clarity
+4 → Clear and complete
+5 → Exceptional clarity + proactive
+
+5) CUSTOMER SENTIMENT
+NA → No customer response at all
+1 → Very negative/escalated
+2 → Negative/frustrated
+3 → Neutral/unclear
+4 → Positive/cooperative
+5 → Very appreciative
+
+6) AGENT TONE
+NA → No agent response at all
+1 → Rude/unprofessional
+2 → Mechanical/not empathetic
+3 → Neutral/correct
+4 → Warm/polite
+5 → Highly empathetic/personalized
+
+
 REFERENCE LIST:
 ${REFERENCE_LIST}
 
