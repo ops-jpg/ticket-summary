@@ -845,42 +845,43 @@ function normalizeFollowUpStatus(raw) {
  * Owner changed to Paul Mason on 2025-12-11 10:24:42 Role :VoIP Support
  * Owner changed to Paul Mason on 2025-12-11 15:18:14 .
  */
-function parseOwnerChangeLog(ownerChangeLogText) {
-  const raw = String(ownerChangeLogText || "").trim();
+ */
+function parseOwnerChangeLog(text) {
+  const raw = String(text || "").trim();
   if (!raw) return [];
 
-  const normalized = raw.replace(/\r\n/g, "\n");
-  const lines = normalized
-    .split("\n")
-    .map((x) => x.trim())
-    .filter(Boolean);
-
+  const lines = raw.replace(/\r\n/g, "\n").split("\n").map(l => l.trim()).filter(Boolean);
   const events = [];
+
   for (const line of lines) {
     const m = line.match(
-      /^Owner\s+changed\s+to\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:\s+Role\s*[:\-]\s*(.+?))?\s*\.?\s*$/i
+      /Owner\s+changed\s+to\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:.*Role\s*[:\-]?\s*(.+))?/i
     );
     if (!m) continue;
 
-    const owner = (m[1] || "").trim();
-    const datePart = (m[2] || "").trim();
-    const timePart = (m[3] || "").trim();
-    const role = (m[4] || "").trim();
+    const owner = m[1]?.trim();
+    const roleRaw = m[4]?.trim();
+    const role =
+      roleRaw && roleRaw.toLowerCase() !== "null" ? roleRaw : "Agent";
+    const time = new Date(`${m[2]}T${m[3]}`);
 
-    const dt = new Date(`${datePart}T${timePart}`);
-    if (owner && !Number.isNaN(dt.getTime())) {
-      events.push({ time: dt, owner, role });
-    }
+    if (!owner || owner.toLowerCase() === "unassigned") continue;
+    if (Number.isNaN(time.getTime())) continue;
+
+    events.push({ owner, role, time });
   }
 
-  events.sort((a, b) => a.time - b.time);
-  return events;
+  return events.sort((a, b) => a.time - b.time);
 }
 
-function roundToNearestHalfHour(hours) {
-  return Math.round(hours * 2) / 2;
+/**
+ * =========================
+ * TIME SPENT CALCULATION (FIXED)
+ * =========================
+ */
+function roundToNearestHalfHour(h) {
+  return Math.round(h * 2) / 2;
 }
-
 function formatHours(h) {
   return `${roundToNearestHalfHour(h)} hrs`;
 }
@@ -892,6 +893,9 @@ function calculateTimeSpentPerUserAndRole({
   fallbackOwnerName,
   fallbackOwnerRole,
 }) {
+  const SAFE_OWNER = name =>
+    name && name.trim() && name !== "N/A" ? name.trim() : null;
+
   const start = createdTime ? new Date(createdTime) : null;
   if (!start || Number.isNaN(start.getTime())) {
     return { perUserText: "", perRoleText: "", ownerTimeSummary: "" };
@@ -901,14 +905,15 @@ function calculateTimeSpentPerUserAndRole({
   const endTime = Number.isNaN(end.getTime()) ? new Date() : end;
 
   const events = parseOwnerChangeLog(ownerChangeLog).filter(
-    (e) => e.time >= start && e.time <= endTime
+    e => e.time >= start && e.time <= endTime
   );
 
   const timeline = [];
 
   if (!events.length) {
-    const owner = (fallbackOwnerName || "").trim();
+    const owner = SAFE_OWNER(fallbackOwnerName);
     if (!owner) return { perUserText: "", perRoleText: "", ownerTimeSummary: "" };
+
     timeline.push({
       owner,
       role: (fallbackOwnerRole || "Agent").trim(),
@@ -916,7 +921,7 @@ function calculateTimeSpentPerUserAndRole({
       to: endTime,
     });
   } else {
-    const initialOwner = (fallbackOwnerName || "").trim();
+    const initialOwner = SAFE_OWNER(fallbackOwnerName);
     const initialRole = (fallbackOwnerRole || "Agent").trim();
 
     if (initialOwner && events[0].time > start) {
@@ -937,7 +942,7 @@ function calculateTimeSpentPerUserAndRole({
 
       timeline.push({
         owner: e.owner,
-        role: (e.role || "").trim() || "Agent",
+        role: e.role,
         from,
         to,
       });
@@ -948,31 +953,76 @@ function calculateTimeSpentPerUserAndRole({
   const perRole = new Map();
 
   for (const seg of timeline) {
-    const ms = seg.to.getTime() - seg.from.getTime();
-    if (ms <= 0) continue;
-    const hrs = ms / (1000 * 60 * 60);
+    const ms = seg.to - seg.from;
+    if (ms <= 0 || !seg.owner) continue;
 
+    const hrs = ms / (1000 * 60 * 60);
     perUser.set(seg.owner, (perUser.get(seg.owner) || 0) + hrs);
     perRole.set(seg.role, (perRole.get(seg.role) || 0) + hrs);
   }
 
   const perUserText = [...perUser.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([name, hrs]) => `${name} - ${formatHours(hrs)}`)
+    .map(([u, h]) => `${u} - ${formatHours(h)}`)
     .join("\n");
 
   const perRoleText = [...perRole.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([role, hrs]) => `${role} - ${formatHours(hrs)}`)
+    .map(([r, h]) => `${r} - ${formatHours(h)}`)
     .join("\n");
 
-  const ownerTimeSummary = perUserText
-    ? `Owner time split: ${perUserText.replace(/\n/g, " | ")}`
-    : "";
-
-  return { perUserText, perRoleText, ownerTimeSummary };
+  return {
+    perUserText,
+    perRoleText,
+    ownerTimeSummary: perUserText
+      ? `Owner time split: ${perUserText.replace(/\n/g, " | ")}`
+      : "",
+  };
 }
 
+/**
+ * =========================
+ * HEALTH CHECK
+ * =========================
+ */
+app.get("/", (_req, res) => res.send("✅ Railway app is live!"));
+
+/**
+ * =========================
+ * WEBHOOK (unchanged logic)
+ * =========================
+ */
+app.post("/desk-webhook", async (req, res) => {
+  try {
+    if (req.headers["desk-shared-secret"] !== DESK_SHARED_SECRET) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    const {
+      owner_change_log,
+      ticket_created_time,
+      ticket_closed_time,
+      ticket_owner,
+      currentOwnerRole,
+    } = req.body;
+
+    const timeSpent = calculateTimeSpentPerUserAndRole({
+      ownerChangeLog: owner_change_log,
+      createdTime: ticket_created_time,
+      closedTime: ticket_closed_time,
+      fallbackOwnerName: ticket_owner,
+      fallbackOwnerRole: currentOwnerRole,
+    });
+
+    return res.json({ ok: true, timeSpent });
+  } catch (err) {
+    console.error("Webhook error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => console.log("Server running on port", PORT));
 /**
  * =========================
  * Desk writeback
