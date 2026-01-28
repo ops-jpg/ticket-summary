@@ -852,24 +852,27 @@ function normalizeFollowUpStatus(raw) {
 // Handle fallback format:
 // Owner: John Doe
 // Role: Agent
-if (/^Owner:\s*/i.test(raw)) {
-  const ownerMatch = raw.match(/Owner:\s*(.+)/i);
-  const roleMatch = raw.match(/Role:\s*(.+)/i);
 
-  const owner = ownerMatch?.[1]?.trim() || "Unassigned";
-  const role = roleMatch?.[1]?.trim() || "Unknown Role";
-
-  return [{
-    time: new Date(createdTime || Date.now()),
-    owner,
-    role,
-  }];
-}
 
 function parseOwnerChangeLog(text) {
   const raw = String(text || "").trim();
   if (!raw) return [];
 
+  // ✅ Handle fallback format:
+  // Owner: John Doe
+  // Role: Agent
+  if (/^Owner:\s*/i.test(raw)) {
+    const ownerMatch = raw.match(/Owner:\s*(.+)/i);
+    const roleMatch = raw.match(/Role:\s*(.+)/i);
+
+    return [{
+      time: new Date(), // fallback uses current time
+      owner: ownerMatch?.[1]?.trim() || "Unassigned",
+      role: roleMatch?.[1]?.trim() || "Unknown Role",
+    }];
+  }
+
+  // ✅ Normal Zoho owner change log
   return raw
     .replace(/\r\n/g, "\n")
     .split("\n")
@@ -893,6 +896,7 @@ function parseOwnerChangeLog(text) {
     .filter(Boolean)
     .sort((a, b) => a.time - b.time);
 }
+
 
 function roundToNearestHalfHour(h) {
   return Math.round(h * 2) / 2;
