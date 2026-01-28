@@ -845,42 +845,42 @@ function normalizeFollowUpStatus(raw) {
  * Owner changed to Paul Mason on 2025-12-11 10:24:42 Role :VoIP Support
  * Owner changed to Paul Mason on 2025-12-11 15:18:14 .
  */
-function parseOwnerChangeLog(ownerChangeLogText) {
-  const raw = String(ownerChangeLogText || "").trim();
+function parseOwnerChangeLog(text) {
+  const raw = String(text || "").trim();
   if (!raw) return [];
 
-  const normalized = raw.replace(/\r\n/g, "\n");
-  const lines = normalized
+  return raw
+    .replace(/\r\n/g, "\n")
     .split("\n")
-    .map((x) => x.trim())
-    .filter(Boolean);
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const m = line.match(
+        /^Owner\s+changed\s+to\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:\s+Role\s*[:\-]\s*(.+))?/i
+      );
+      if (!m) return null;
 
-  const events = [];
-  for (const line of lines) {
-    const m = line.match(
-      /^Owner\s+changed\s+to\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:\s+Role\s*[:\-]\s*(.+?))?\s*\.?\s*$/i
-    );
-    if (!m) continue;
+      const dt = new Date(`${m[2]}T${m[3]}`);
+      if (Number.isNaN(dt.getTime())) return null;
 
-    const owner = (m[1] || "").trim();
-    const datePart = (m[2] || "").trim();
-    const timePart = (m[3] || "").trim();
-    const role = (m[4] || "").trim();
-
-    const dt = new Date(`${datePart}T${timePart}`);
-    if (owner && !Number.isNaN(dt.getTime())) {
-      events.push({ time: dt, owner, role });
-    }
-  }
-
-  events.sort((a, b) => a.time - b.time);
-  return events;
+      return {
+        time: dt,
+        owner: m[1]?.trim() || "Unassigned",
+        role: m[4]?.trim() || "Unknown Role",
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.time - b.time);
 }
 
-function roundToNearestHalfHour(hours) {
-  return Math.round(hours * 2) / 2;
+/**
+ * =========================
+ * TIME CALCULATION (FINAL)
+ * =========================
+ */
+function roundToNearestHalfHour(h) {
+  return Math.round(h * 2) / 2;
 }
-
 function formatHours(h) {
   return `${roundToNearestHalfHour(h)} hrs`;
 }
@@ -907,31 +907,26 @@ function calculateTimeSpentPerUserAndRole({
   const timeline = [];
 
   if (!events.length) {
-    const owner = (fallbackOwnerName || "").trim();
-    if (!owner) return { perUserText: "", perRoleText: "", ownerTimeSummary: "" };
     timeline.push({
-      owner,
-      role: (fallbackOwnerRole || "Agent").trim(),
+      owner: fallbackOwnerName?.trim() || "Unassigned",
+      role: fallbackOwnerRole?.trim() || "Unknown Role",
       from: start,
       to: endTime,
     });
   } else {
-    const initialOwner = (fallbackOwnerName || "").trim();
-    const initialRole = (fallbackOwnerRole || "Agent").trim();
-
-    if (initialOwner && events[0].time > start) {
+    if (events[0].time > start) {
       timeline.push({
-        owner: initialOwner,
-        role: initialRole,
+        owner: fallbackOwnerName?.trim() || "Unassigned",
+        role: fallbackOwnerRole?.trim() || "Unknown Role",
         from: start,
         to: events[0].time,
       });
     }
 
     for (let i = 0; i < events.length; i++) {
-      const e = events[i];
+      const cur = events[i];
       const next = events[i + 1];
-      const from = e.time < start ? start : e.time;
+      const from = cur.time < start ? start : cur.time;
       const to = next ? next.time : endTime;
       if (to <= from) continue;
 
