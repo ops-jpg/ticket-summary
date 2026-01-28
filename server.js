@@ -865,7 +865,7 @@ function parseOwnerChangeLog(text) {
 
       return {
         time: dt,
-        owner: m[1]?.trim() || "Unassigned",
+        owner: m[1].trim(),
         role: m[4]?.trim() || "Unknown Role",
       };
     })
@@ -873,14 +873,10 @@ function parseOwnerChangeLog(text) {
     .sort((a, b) => a.time - b.time);
 }
 
-/**
- * =========================
- * TIME CALCULATION (FINAL)
- * =========================
- */
 function roundToNearestHalfHour(h) {
   return Math.round(h * 2) / 2;
 }
+
 function formatHours(h) {
   return `${roundToNearestHalfHour(h)} hrs`;
 }
@@ -931,8 +927,8 @@ function calculateTimeSpentPerUserAndRole({
       if (to <= from) continue;
 
       timeline.push({
-        owner: e.owner,
-        role: (e.role || "").trim() || "Agent",
+        owner: cur.owner,
+        role: cur.role,
         from,
         to,
       });
@@ -943,30 +939,32 @@ function calculateTimeSpentPerUserAndRole({
   const perRole = new Map();
 
   for (const seg of timeline) {
-    const ms = seg.to.getTime() - seg.from.getTime();
-    if (ms <= 0) continue;
-    const hrs = ms / (1000 * 60 * 60);
-
+    const hrs = (seg.to - seg.from) / (1000 * 60 * 60);
+    if (hrs <= 0) continue;
     perUser.set(seg.owner, (perUser.get(seg.owner) || 0) + hrs);
     perRole.set(seg.role, (perRole.get(seg.role) || 0) + hrs);
   }
 
   const perUserText = [...perUser.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([name, hrs]) => `${name} - ${formatHours(hrs)}`)
+    .map(([u, h]) => `${u} - ${formatHours(h)}`)
     .join("\n");
 
   const perRoleText = [...perRole.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([role, hrs]) => `${role} - ${formatHours(hrs)}`)
+    .map(([r, h]) => `${r} - ${formatHours(h)}`)
     .join("\n");
 
-  const ownerTimeSummary = perUserText
-    ? `Owner time split: ${perUserText.replace(/\n/g, " | ")}`
-    : "";
+  const ownerTimeSummary = [
+    perUserText && `Time spent per agent:\n${perUserText}`,
+    perRoleText && `\nTime spent per role:\n${perRoleText}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return { perUserText, perRoleText, ownerTimeSummary };
 }
+
 
 /**
  * =========================
