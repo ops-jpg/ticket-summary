@@ -852,6 +852,12 @@ function normalizeFollowUpStatus(raw) {
 // Handle fallback format:
 // Owner: John Doe
 // Role: Agent
+function normalizeOwnerName(name) {
+  const n = String(name || "").trim();
+  if (!n) return "";
+  if (n.toUpperCase() === "N/A" || n.toLowerCase() === "na") return "";
+  return n;
+}
 
 
 function parseOwnerChangeLog(text) {
