@@ -54,381 +54,75 @@ const ZOHO_ACCOUNTS_DOMAIN =
  */
 const DEFAULT_REFERENCE_LIST = `
 
-OS Issue:
-- Mapping: OS mapping mismatch vs EHR
-- Configuration: OS setup/config needed
-- Appointment Write problem into EHR: writeback off/fails
-- Wrong Appointment Time: booked time wrong
-- Slot Missing: slots missing vs EHR
-- Slot Available on Block / Holiday: blocked/holiday slots visible
-- Provider Hours Missing: provider hours missing
-- Operatory Hours Missing: operatory hours wrong/missing
-- Business Hours Missing: hours mismatch EHR vs Adit
-- Incorrect Slots Appear: slots not blocked per EHR
-- Forms Configuration Issue: OS webforms/microsite misconfig
+VoIP & Phone Issues:
+- Phone hardware: Device not ringing, not powering on, keys failing, faulty ports/cables, Bluetooth headset pairing — desktop or cordless phones.
+- Softphone / app: Softphone not launching or crashing on Desktop, iOS, or Android; call park on app failing; firmware/update issues.
+- Call quality – audio: One-way audio, static/crackling, latency, jitter, low bandwidth — inbound, outbound, or both directions.
+- Outbound / inbound calls: Unable to make outbound calls; inbound calls not ringing; silent calls; calls going straight to voicemail.
+- Voicemail: Voicemail not recording, not accessible, setup missing, hold music/greeting issues, multiple VM box setup.
+- Caller ID & spam: Wrong caller name displayed, caller ID mismatch, spam calls received, label/name update needed.
+- Call drop: Calls disconnecting mid-conversation — network-related, firmware-related, or whitelisting gap.
+- Number porting & carrier: Porting not completed or stuck, carrier issues with Plivo/Telnyx, wrong network config, whitelisting pending, tracking number changes.
+- Installations & hardware setup: New or replacement phone install, partial install, V3 migration, Bluetooth headset setup, firmware updates.
+- Call flow & routing: Call flow errors, IVR misrouting, call override not working, speed dials, call park lines, call forwarding config.
+- Training – VoIP features: Training on call flow, phone features, call override, eFax, conference, E911, multi-location transfer, block caller, hold music, audio library, call tracking, call pop up, patient card, multi VM box.
+- Bugs & defects – phone/app: Mobile/desktop app crashing, softphone bugs, firmware bugs, unable to answer/hang up, hardware defects, hold music/audio library failing, call tracking/flow/override not working, software glitches.
 
-Engage Issue:
-- Appointment Reminder Isn't Received: AR not received
-- Appointment Reminder Setup Issue: AR workflow/config missing
-- Appointment Reminder With Incorrect Time: AR time wrong/out of sync
-- Appointment Reminder Delay: AR late
-- SC Isn't Received: SC not sent
-- SC Issue for New & Existing Patient: SC flow wrong by patient type
-- SC Issue With Patient Forms: SC missing forms
-- AR Cron Issue: AR cron down
-- SC Cron Issue: SC cron down
-- BR Sent to Inactive Patients: BR to inactive
-- BR Sent to Wrong Patient: BR wrong patient
-- BR Not Sent: BR not triggered
-- Recall Reminder Not Sent: recall not sent
-- Recall Reminder to Inactive Patient: recall to inactive
-- Recall Sent to Wrong Patient: recall wrong patient
-- Recall Not Sent Despite Appointment: appt exists but no recall
-- Recall Types Issue: recall types/toggles missing
-- Recall Due Date Issue: recall due date wrong
-- Payment Reminder Issue: payment reminders not sent
-- Missed Call Text Issue: missed call text not sent (config/hours)
-- Auto Confirmation Issue: auto-confirm not updating
-- Appointment Write Issue: appt not written from OS
-- Multiple Appointment Confirmed Issue: multi-confirm handling wrong
-- Auto Confirm Thank You Issue: wrong thank-you
-- Status Mapping Issue: status mapping wrong
-- Auto Confirmation Mapping Issue: EHR not updating after confirm
-- Auto Confirmation Reply Issue: auto-confirm reply not sent
-- Chat Thread Not Updated: chat not syncing
-- Wrong Chat Populate: wrong chat mapping/delay
-- Chat Thread Missing: chat thread missing
+Engage & Automated Messaging:
+- Appointment reminders (AR): AR not received, wrong time in reminder, reminder delay, AR cron down, AR workflow/config missing.
+- Scheduling confirmations (SC): SC not sent, SC flow wrong for new vs existing patient type, SC missing patient forms, SC cron down.
+- Broadcast / recall reminders: BR sent to wrong/inactive patient, BR not triggered, recall not sent, recall to inactive, recall types/toggles missing, recall due date wrong, recall sent to wrong patient, recall not sent despite appointment existing.
+- Missed call & auto-confirm: Missed call text not sent (config/hours), auto-confirm not updating EHR, thank-you message wrong, auto-confirm reply not sent, multiple appointment confirm handling wrong.
+- Payment reminders: Payment reminders not being sent out to patients.
+- Mass texting: Cannot stop a mass text in progress, cannot select patient segment.
+- ASAP list: Wrong patients appearing in ASAP list, ASAP list showing empty.
+- Email delivery: Email bounce-back (DNS/TXT), email not sending, attachment failures, tags not applied, unsubscribe issues, email reporting wrong.
+- Internal / patient chat: Chat widget not opening, chats auto-deleted, chat not syncing, messages not received, cannot delete, message delay.
+- Status & mapping: Status mapping wrong, auto-confirm mapping issue, chat thread not updating, wrong chat populate, chat thread missing.
 
-Patient Form Issue:
-- Patient Form Not Sending: not sent (bad email/phone)
-- Patient Form Not Received: not received in Adit/EHR
-- Form Details Not Auto-Populating: autofill missing
-- Mapping Issue: PMS mapping wrong
-- Allergies/Problem/Medication Not Syncing: APM not imported
-- Allergies/Problem/Medication Write-back Issue: APM writeback fails
-- Medical History Questions Not Syncing: MH questions not synced
-- Medical History Write-back Issue: MH writeback fails
-- Allergies/Problem/Medication Missing: APM missing
-- Signature Issue: signature missing
-- Multi-Sign Issue: multi-sign misconfig
-- Patient Form Importing Issue: import sync fails
-- Patient Form Missing After Submission: submitted form missing
-- Device Connection Issue: kiosk/device disconnected/outdated
-- Field Dependency Issue: conditional logic broken
-- PDF Sync Issue: PDF not generated/synced
-- PDF Not Opening in EHR: PDF not viewable in EHR
-- Auto Import Issue: auto-import off/wrong link
-- New Patient Updated Into Existing Patient: wrong chart link
-- Existing Patient Updated With New Patient Details: overwrite wrong
-- PDF Layout Issue: PDF formatting wrong
-- Patient Form Auto Assign Issue: auto-assign/approve fails
+Patient Forms & Documents:
+- Form not sending / received: Form not sent to patient (bad email/phone), not received back in Adit or EHR, auto-assign/approve fails, auto-import off/wrong link.
+- Form auto-populate & mapping: Autofill missing, PMS mapping wrong, conditional field/dependency logic broken, form details not flowing into correct fields.
+- Medical history & allergies sync: APM (allergies/problems/medications) not imported, APM writeback fails, APM missing, medical history questions not synced, MH writeback fails.
+- Signature & multi-sign: Signature missing, multi-sign misconfig.
+- PDF issues: PDF not generated/synced, PDF not viewable in EHR, PDF formatting/layout wrong.
+- Form import & patient linking: Import sync fails, submitted form missing after submission, new patient linked to wrong existing chart, existing patient overwritten with wrong details.
+- Kiosk / device connection: Kiosk or patient-facing device disconnected or running outdated version.
+- Patient card data: Patient details/logs/follow-up logs missing, wrong last/next/due date, photo missing, form search fails.
+- Reviews & reputation: Review request not sent, review frequency wrong, GMB/business URL missing, GBP disconnected, feedback missing, reviews not syncing, review link broken.
+- Website edits: Page content not updating after edit request, broken links on website.
 
-Patient Card:
-- Patient Details Missing: details missing
-- Patient Logs Missing: logs missing
-- Follow-Up Logs Missing: follow-up logs missing
-- Wrong Last/Next/Due Date: dates wrong
-- Image Missing: photo missing
-- Patient Form Search Issue: form search fails
+EHR  PMS Sync & Server:
+- OS mapping & configuration: OS mapping mismatch vs EHR, OS setup/config needed, incorrect slots appearing, slot missing, slots available on block/holiday, forms configuration/microsite misconfig.
+- Provider / operatory / business hours: Provider hours missing, operatory hours wrong/missing, business hours mismatch between EHR and Adit.
+- Appointment write-back: Appointment not written from OS to EHR, writeback off/fails, wrong appointment time booked.
+- Patient sync: Patient not syncing from EHR to Adit, duplicate patients created.
+- Server app – connectivity: EHR/PMS disconnected error on Adit app, frequent disconnects, EHR down, server app crash, server crash, high CPU, EHR crashing, resync needed, server disconnection.
+- Server app – setup & upgrades: Server app install/reinstall/upgrade, cloud EHR install, EHR change/upgrade, system changed, Chrome extension install or not working, forms not syncing via server, payments not syncing, reminders blocked, practice analytics not syncing.
+- Appointment booking (Adit side): Unable to book appointment in Adit, appointment not syncing/appearing in Adit or EHR.
+- Practice analytics: Analytics not syncing/loading, data wrong, export fails, report filters/view fail, dashboard not loading, preferences/goals, patient list help, training, upgrade request, feature request.
+- Telemed: Video/audio not working in telemed session, telemed link invalid.
+- App performance & misc sync: Adit app slow on web or desktop, frequent disconnect when server off, EHR sync broken, status mapping wrong, wrong business hours config, app lag, notification redirect fail, dual notification/duplicates.
 
-Pozative Issue:
-- Review Request Not Sent: review request not sent
-- Frequency Issue: review frequency wrong
-- Business URL Missing: business/GMB URL missing
-- Business Page Disconnection: GBP disconnected
-- Feedback Issue: feedback missing
-- Reviews Not Syncing: reviews not syncing
+Billing Payments & Adit Pay:
+- Invoice & billing: Invoice wrong or missing, credit note disputes, outstanding invoice follow-ups.
+- Refund requests: Customer requesting a refund, refund not reflecting after processing.
+- Adit Pay – setup & onboarding: Terminal registration, sign-up/set up, walkthrough training, demo/basic inquiry, price comparison.
+- Adit Pay – transactions: Payment failures, ledger not posting, payout delays, EHR disconnection affecting payments, payments not syncing, payments issue.
+- Adit Pay – hardware: Terminal issues, hardware replacement or return (RMA).
+- Adit Pay – bugs & config: Bugs/outages, configuration/settings, basic troubleshooting, feature requests.
 
-Email Issue:
-- Email Bounce Back: DNS/TXT issue
-- Email Sending Issue: email not sending
-- Email Attachment Issue: attachment failures
-- Email Tags Issue: tags not applied
-- Email Reporting Issue: reporting wrong
-- Unsubscribe Issue: unsubscribe fails
-
-Desktop Phones:
-- Phone not ringing when receiving calls: no ring
-- Unable to make outbound calls: outbound fails
-- Account not registered / logged out: SIP unregistered
-- Keys not responding or malfunctioning: keys fail
-- Phone not powering on / random shutdowns: power/reboot
-- Call park not working: call park fails
-- Firmware not updating or stuck update: fw update stuck
-- Receiver not working / no audio: no audio
-- Faulty handset or LAN ports: hardware/ports
-- LAN cable damaged / loose: cable/connection
-- Bluetooth headset not connecting: BT pairing
-
-Cordless Phones:
-- Phone not ringing when receiving calls: no ring
-- Unable to make outbound calls: outbound fails
-- Account not registered / logged out: SIP unregistered
-- Phone goes out of range: range loss
-- Base station offline or disconnected: base offline
-- Keys not responding or malfunctioning: keys fail
-- Phone not powering on / random shutdowns: power/battery
-- Call park not working: call park fails
-- Firmware not updating or stuck update: fw update stuck
-- Receiver not working / no audio: no audio
-- Faulty handset or LAN ports: hardware/ports
-- LAN cable damaged / loose: cable/connection
-- Bluetooth headset not connecting: BT pairing
-
-Software:
-- Notifications not working: notifications fail
-- Voicemail not working / setup issues: VM config/access
-- Softphone not working on Desktop: desktop softphone fails
-- Softphone not working on Android: android softphone fails
-- Softphone not working on iOS: iOS softphone fails
-- Call park not working on app: app call park fails
-- Number assignment errors: number assignment wrong
-- Voicemail access errors: VM access errors
-- Update or change label/name: label change
-- Wrong practice timezone configuration: timezone wrong
-- Call flow errors: routing/callflow errors
-
-Product / Carrier Issues:
-- Need isolation testing: isolation testing needed
-- Whitelisting pending/not done: whitelisting incomplete
-- Device-specific problems: device/model specific
-- Server-related issues: server config/outage
-- Carrier issue with Plivo: plivo carrier issue
-- Carrier issue with Telnyx: telnyx carrier issue
-- Porting not completed / failed: port stuck/failed
-- Wrong or broken network configuration: network misconfig
-- Receiver failure (audio issues): audio output failure
-- Unable to send or open attachments: attachments fail
-
-Audio Quality – Inbound:
-- Internet speed too low: low bandwidth
-- High call latency / delay: latency/delay
-- Call fluctuations / instability: jitter/packet loss
-- One-way audio (hear only one side): one-way
-- Crackling/static noise: static
-- Whitelisting required: needs whitelist
-- Client expectation not met: below expectation
-
-Audio Quality – Outbound:
-- Internet speed too low: low upload
-- High call latency / delay: latency/delay
-- Call fluctuations / instability: jitter/packet loss
-- One-way audio (hear only one side): one-way
-- Crackling/static noise: static
-- Whitelisting required: needs whitelist
-- Client expectation not met: below expectation
-
-Audio Quality – Both Directions:
-- Internet speed too low: low bandwidth
-- High call latency / delay: latency/delay
-- Call fluctuations / instability: jitter/packet loss
-- One-way audio (hear only one side): one-way
-- Crackling/static noise: static
-- Whitelisting required: needs whitelist
-- Client expectation not met: below expectation
-
-Caller Name / ID:
-- Receiving spam calls: spam calls
-- Wrong caller name displayed: name wrong
-- Caller ID mismatch: CID mismatch
-- Need to update label name: label update
-
-General Enquiries:
-- Request for product information: product info
-- Asking for a new feature: feature request
-- Questions on managing users: user mgmt
-- Questions on managing permissions: permissions
-- Client expectation queries: expectations
-
-Custom Fix:
-- Enable/disable hold reminder tone: hold tone
-- Adjust timezone settings: timezone
-- Change call waiting tone: waiting tone
-- Error during upgrade (timeout): upgrade timeout
-- Setup speed dials: speed dials
-- Add more call park lines: more park lines
-- Provide a feature-specific workaround: workaround
-
-Bugs & Defects:
-- Mobile app crashing: mobile crash
-- Desktop app crashing: desktop crash
-- Softphone bugs: softphone bugs
-- Firmware-related bugs: firmware bugs
-- Notifications not working: notification bug
-- Unable to answer or hang up calls: answer/hangup fails
-- Hardware defect: hardware defect
-- Voicemail issues: VM bugs
-- Hold music not working: hold music fails
-- Audio library not working: audio library fails
-- Software glitches: glitches
-- Call tracking not working: call tracking fails
-- Call flow not working: call flow fails
-- Call override not working: override fails
-
-Call Drop:
-- Network issues causing call drop: network drops
-- Firmware bug causing call drop: firmware drops
-- Whitelisting pending/not done: whitelist drops
-
-Installations:
-- New phone installation: new install
-- Replacement phone install: replacement install
-- Partial phone installation: partial install
-- V3 migration setup: v3 migration
-- Bluetooth headset installation: BT headset setup
-
-Training:
-- Call Flow Training: call flow/IVR training
-- Phone feature training: phone features
-- Desktop app training: desktop app
-- Mobile app training: mobile app
-- Call override training: call override
-- eFax training: eFax
-- Block caller: block caller
-- Hold music: hold music
-- Audio library: audio library
-- Multilocation call transfer: multi-location transfer
-- Conference call setup: conference setup
-- Enable patient card: enable patient card
-- Enable call pop up: call pop up
-- Call tracking: call tracking
-- E911 Setup: E911
-- Multiple Voicemail Box: multi VM box
-
-Mass Texting:
-- Not able to stop mass text: cannot stop
-- Not able to select segment in mass text: cannot select segment
-
-ASAP:
-- Wrong patient appear in ASAP: wrong patients
-- No patient in ASAP list: list empty
-
-Internal Chat:
-- Messages not received: not received
-- Not able to delete chat: cannot delete
-- Message delay: delayed
-
-Others:
-- Notification Missing: missing
-- Notification read issue: cannot open
-- Notification not redirecting: redirect fail
-- Dual notification issue: duplicates
-- App Lag Issue: app lag
-- Server disconnection: disconnect if server off
-- EHR Sync break: EHR sync broken
-- Frequent Disconnect: frequent disconnects
-- Adit app slow in web: web slow
-- Adit app slow in desktop app: desktop slow
-- Status mapping issue: status mapping wrong
-- Wrong business hours: BH misconfig
-
-Server App:
-- EHR/PMS Disconnected Error on Adit app: disconnected
-- Patient forms are not syncing: forms not syncing
-- Reminders not going out: reminders blocked
-- Payments not syncing: pay not syncing
-- EHR disconnected: EHR down
-- Practice Analytics not syncing: PA not syncing
-- Server app resync: resync needed
-- Server app reinstall: reinstall needed
-- Server app install: install needed
-- EHR change: EHR change needed
-- EHR disconnection frequently: frequent disconnects
-- Server system changed: system changed
-- High CPU usage: high CPU
-- EHR Crashing: EHR crash
-- Server Crashing: server crash
-- EHR upgrade: EHR upgrade
-- Server App upgrade: server app upgrade
-- Cloud EHR install: cloud install
-- Chrome Extension not working: ext not working
-- Chrome Extension installation: ext install
-
-Adit Pay:
-- Ledger Posting: not posting
-- Payment Issue: payments issue
-- Terminal Issues: terminal issue
-- Hardware Replacement/Return: hardware RMA
-- Demo/Basic Inquiry: demo/info
-- Walkthrough Training: training
-- Sign Up/Set Up: onboarding
-- Terminal Registration: registration
-- Price Comparison: price compare
-- Feature Request: feature request
-- Bugs/Outage: bugs/outage
-- Configuration/Settings: config
-- Basic Troubleshooting: troubleshooting
-- EHR Disconnection: EHR disconnect
-- Payment Failure: payment fails
-- Payout Delay: payout delayed
-- Refund Not Reflecting: refund missing
-
-Practice Analytics:
-- Sync: sync/load fails
-- Data issues: data wrong
-- Preferences: preferences/goals
-- Training: training
-- Upgrade to Analytics: upgrade request
-- Feature Requests: feature request
-- Patient list Requests: patient list help
-- Export: export fails
-- Daily, Weekly, Monthly Reports: report filters/view fail
-
-Chat Issue:
-- Chats not working: widget not opening
-- Chats Deleted: auto-deleted
-- Chats not syncing: not syncing
-
-Bulk Issue:
-- Bulk Upload / Import issue: import/upload fails
-- Bulk SMS Issue: bulk SMS fails
-- Bulk Email Issue: bulk email fails
-
-Form Issue:
-- Form not loading: not loading
-- Form Submission Issue: submit fails
-- Mapping Issue: mapping wrong
-
-Review Issue:
-- Reviews not coming: not syncing
-- Review link not working: link broken
-
-Billing Issue:
-- Invoice Issue: invoice wrong/missing
-- Refund Request: refund requested
-
-Campaign Issue:
-- Campaign not working: not sending
-- Tracking Issue: tracking wrong
-
-Call Tracking Issue:
-- Number not working: number dead
-- Call Forwarding Issue: forwarding wrong
-
-Website Edits Issues:
-- website Edit: Page not updating
-- website Edits: Broken Links
-
-Permission Issue:
-- User Role Issue: wrong role
-- Access Denied: access denied
-
-Telemed Issue:
-- Video Not Working: video fails
-- Audio Not Working: audio fails
-- Link Not Working: link invalid
-
-Patient Sync Issue:
-- Patient not syncing: missing patient
-- Duplicate Patient: duplicates
-
-Analytics Issue:
-- Report Wrong: numbers wrong
-- Dashboard not loading: dashboard fails
-
-Appointment Issue:
-- Unable to book appointment: booking fails
-- Appointment not syncing: not in Adit/EHR
+Account Onboarding & General:
+- Onboarding & go-live: Delays going live with Adit, scheduling onboarding meetings, client expectation gaps during onboarding, cancellation requests.
+- User & permissions management: Adding/removing users, wrong user role, access denied, managing permissions, staff access for finances/security.
+- Product information & feature requests: General how-to questions, asking about a new feature, product capability inquiries, client expectation queries.
+- Call tracking: Tracking number not working, call forwarding issue, replacing a tracking number, call log questions.
+- Campaign & marketing: Email/SMS campaigns not sending, campaign tracking wrong, Google Ads, GMB post approval, SEO/Advanced SEO queries.
+- Bulk operations: Bulk upload/import failing, bulk SMS failing, bulk email failing.
+- Notifications (standalone): Desktop or mobile notification missing, cannot open notification, redirect failing, duplicate notification.
+- Insurance verification (manual): Manual eligibility check requests, coverage breakdown requests, verifying patient with specific carrier — handled by team, not a system bug.
+- Custom fix / workaround: Enable/disable hold reminder tone, adjust timezone settings, change call waiting tone, error during upgrade (timeout), setup speed dials, add more call park lines, feature-specific workaround.
+- General / other: Genuinely miscellaneous tickets — appreciation messages, meeting scheduling, recap acknowledgements. Use sparingly.
 `;
 
 
