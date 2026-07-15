@@ -825,11 +825,15 @@ app.post("/desk-webhook", async (req, res) => {
       closedTime = "",
       currentOwnerName = "",
       currentOwnerRole = "",
+
+      notes_count = 0,
     } = body;
 
     createdTime = createdTime || ticket_created_time || "";
     closedTime = closedTime || ticket_closed_time || "";
     currentOwnerName = currentOwnerName || ticket_owner || "";
+
+    const notesCount = Number(notes_count) || 0;
 
     // Fetch Desk ticket (source of truth)
     let deskTicket = null;
@@ -881,9 +885,16 @@ app.post("/desk-webhook", async (req, res) => {
       fallbackOwnerRole: currentOwnerRole,
     });
 
-    // If <= 1 thread, skip AI scoring (but threads already updated)
-    if (Number.isFinite(threadCount) && threadCount <= 1) {
-      return res.json({ ok: true, skipped: true, reason: "threadCount<=1", threadCount, timeSpent });
+    // If <= 1 thread AND no notes, skip AI scoring (but threads already updated)
+    if (Number.isFinite(threadCount) && threadCount <= 1 && notesCount === 0) {
+      return res.json({
+        ok: true,
+        skipped: true,
+        reason: "threadCount<=1 and no notes",
+        threadCount,
+        notesCount,
+        timeSpent,
+      });
     }
 
     // Call AI
@@ -911,7 +922,7 @@ app.post("/desk-webhook", async (req, res) => {
       ? await updateDeskTicket(ticket_id, { aiResult: ai, threadCount, timeSpent })
       : { skipped: true };
 
-    return res.json({ ok: true, threadCount, ai, timeSpent, desk: deskResult });
+    return res.json({ ok: true, threadCount, notesCount, ai, timeSpent, desk: deskResult });
   } catch (err) {
     console.error("Webhook error:", err);
     return res.status(500).json({ ok: false, error: err.message || "Unknown error" });
