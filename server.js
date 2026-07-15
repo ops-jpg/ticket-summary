@@ -861,9 +861,13 @@ app.post("/desk-webhook", async (req, res) => {
     // Thread count (authoritative)
     const threadCount = getThreadCountFromDeskTicket(deskTicket);
 
-    // ✅ Always update thread count
-    if (ticket_id && Number.isFinite(threadCount)) {
-      await updateThreadCountOnly(ticket_id, threadCount);
+    // Combined count = real threads + private notes, so the field reflects
+    // total conversation activity (matches Desk's "N CONVERSATIONS" tab)
+    const combinedThreadCount = (Number.isFinite(threadCount) ? threadCount : 0) + notesCount;
+
+    // ✅ Always update thread count (combined with notes)
+    if (ticket_id) {
+      await updateThreadCountOnly(ticket_id, combinedThreadCount);
     }
 
     // Owner Change Log autofill if empty
@@ -919,10 +923,10 @@ app.post("/desk-webhook", async (req, res) => {
 
     // Write back to Desk (includes threads + llm fields)
     const deskResult = ticket_id
-      ? await updateDeskTicket(ticket_id, { aiResult: ai, threadCount, timeSpent })
+      ? await updateDeskTicket(ticket_id, { aiResult: ai, threadCount: combinedThreadCount, timeSpent })
       : { skipped: true };
 
-    return res.json({ ok: true, threadCount, notesCount, ai, timeSpent, desk: deskResult });
+    return res.json({ ok: true, threadCount: combinedThreadCount, notesCount, ai, timeSpent, desk: deskResult });
   } catch (err) {
     console.error("Webhook error:", err);
     return res.status(500).json({ ok: false, error: err.message || "Unknown error" });
